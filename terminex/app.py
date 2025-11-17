@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import sys
 import time
 from dataclasses import dataclass
 
@@ -10,7 +12,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from .config import Config
+from .config import Config, load as load_config
 from .display import build_table
 from .keyboard import KeyboardListener
 from .providers.base import Provider, ProviderError
@@ -170,3 +172,50 @@ class App:
         finally:
             kb.stop()
         return 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="terminex",
+        description=(
+            "Live multi-asset dashboard: FX (top 25), crypto (top 25 by "
+            "mcap), and commodity futures."
+        ),
+    )
+    parser.add_argument("--base", default=None, help="FX base currency")
+    parser.add_argument(
+        "--interval", type=float, default=None, help="refresh interval (s)"
+    )
+    parser.add_argument(
+        "--tab",
+        choices=TAB_ORDER,
+        default=None,
+        help="tab to launch on (fx/crypto/commodity)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    config = load_config()
+    if args.base:
+        config = Config(
+            base_currency=args.base.upper(),
+            refresh_interval=config.refresh_interval,
+            active_tab=config.active_tab,
+            coincap_api_key=config.coincap_api_key,
+        )
+    if args.tab:
+        config = Config(
+            base_currency=config.base_currency,
+            refresh_interval=config.refresh_interval,
+            active_tab=args.tab,
+            coincap_api_key=config.coincap_api_key,
+        )
+    interval = args.interval if args.interval is not None else config.refresh_interval
+    app = App(config=config, interval=interval)
+    return app.run()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
