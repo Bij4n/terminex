@@ -1,14 +1,15 @@
 # terminex
 
-A terminal tool that displays live-updating exchange rates for the top 25
-most-traded foreign currencies (per the BIS triennial FX survey).
+A terminal dashboard for live prices across three asset classes:
+
+- **FX** — top 25 most-traded currencies (BIS triennial survey)
+- **Crypto** — top 25 coins by market cap
+- **Commodities** — metals, energy, and agriculturals futures
 
 ## Requirements
 
-- Python 3.9+
-- `requests`, `rich` (see `requirements.txt`)
-
-## Install
+- Python 3.11+ (uses `tomllib`)
+- `requests`, `rich`
 
 ```bash
 pip install -r requirements.txt
@@ -17,23 +18,56 @@ pip install -r requirements.txt
 ## Run
 
 ```bash
+python3 -m terminex
+# or, legacy entry point:
 python3 forex.py
 ```
 
-Press `Ctrl+C` to quit.
+### Keys
 
-### Options
+| Key   | Action                |
+|-------|-----------------------|
+| `1`   | FX tab                |
+| `2`   | Crypto tab            |
+| `3`   | Commodities tab       |
+| `r`   | Force refresh now     |
+| `q`   | Quit                  |
 
-- `--base USD` — base currency (default: `USD`)
-- `--interval 10` — refresh interval in seconds (default: `10`)
+### CLI options
 
-## Data source
+- `--base USD` — FX base currency (default: `USD`)
+- `--tab fx|crypto|commodity` — tab to start on
+- `--interval 10` — refresh interval in seconds
 
-Rates are fetched from the free [open.er-api.com](https://open.er-api.com)
-endpoint. The public feed updates roughly once per hour; the app polls at the
-configured interval and highlights any change since the previous tick.
+## Data sources
 
-## Currencies shown
+| Asset       | Provider            | Key required?     | Notes                              |
+|-------------|---------------------|-------------------|------------------------------------|
+| FX          | `open.er-api.com`   | no                | updates ~hourly                    |
+| Crypto      | `rest.coincap.io`   | **yes** (free)    | top 25 by mcap, sub-minute data    |
+| Commodities | `stooq.com` (CSV)   | no                | 14 futures, ~15-min delayed        |
 
-USD, EUR, JPY, GBP, CNY, AUD, CAD, CHF, HKD, SGD, SEK, KRW, NOK, NZD, INR,
-MXN, TWD, ZAR, BRL, DKK, PLN, THB, ILS, IDR, CZK.
+To enable the crypto tab, [grab a free CoinCap API
+key](https://coincap.io/) and export it:
+
+```bash
+export TERMINEX_COINCAP_KEY=your-key-here
+```
+
+Or put it in the config file (see below).
+
+## Config file
+
+terminex looks for `~/.config/terminex/config.toml` (or
+`$XDG_CONFIG_HOME/terminex/config.toml`). All keys optional:
+
+```toml
+base_currency = "USD"
+refresh_interval = 10
+active_tab = "fx"
+
+[providers.crypto]
+api_key = "your-coincap-key"
+```
+
+Environment variables win over config file values.
