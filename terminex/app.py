@@ -33,6 +33,17 @@ class TabState:
     previous_rates: dict[str, float] | None = None
     last_error: str | None = None
     last_fetch_attempt: float = 0.0
+    selected_index: int = 0
+
+    def clamp_selection(self) -> None:
+        if self.last_snapshot is None:
+            self.selected_index = 0
+            return
+        n = len(self.last_snapshot.quotes)
+        if n == 0:
+            self.selected_index = 0
+        else:
+            self.selected_index = max(0, min(self.selected_index, n - 1))
 
 
 class App:
