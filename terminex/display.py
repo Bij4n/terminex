@@ -67,6 +67,7 @@ def _delta_cell(current: float, previous: float | None) -> Text:
 def build_table(
     snapshot: Snapshot,
     previous: dict[str, float] | None = None,
+    selected_index: int | None = None,
 ) -> Table:
     asset = snapshot.asset_class
     ccy = snapshot.quote_ccy
@@ -118,6 +119,7 @@ def build_table(
         if has_24h:
             row.append(pct_text)
         row.append(delta_text)
-        table.add_row(*row)
+        row_style = "reverse" if selected_index == idx - 1 else None
+        table.add_row(*row, style=row_style)
 
     return table
