@@ -107,7 +107,12 @@ class App:
         header = self._header()
 
         if state.last_snapshot is not None:
-            body = build_table(state.last_snapshot, state.previous_rates)
+            state.clamp_selection()
+            body = build_table(
+                state.last_snapshot,
+                state.previous_rates,
+                selected_index=state.selected_index,
+            )
         elif state.last_error is not None:
             body = Panel(
                 Text(state.last_error, style="red"),
@@ -145,6 +150,23 @@ class App:
                 return True
         if ch in ("r", "R"):
             self._refresh(self.active_tab)
+            return True
+        state = self.tabs[self.active_tab]
+        if ch == "j":
+            state.selected_index += 1
+            state.clamp_selection()
+            return True
+        if ch == "k":
+            state.selected_index -= 1
+            state.clamp_selection()
+            return True
+        if ch == "g":
+            state.selected_index = 0
+            return True
+        if ch == "G":
+            if state.last_snapshot is not None:
+                state.selected_index = len(state.last_snapshot.quotes) - 1
+                state.clamp_selection()
             return True
         return False
 
