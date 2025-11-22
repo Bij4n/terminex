@@ -71,7 +71,7 @@ def build_table(
 ) -> Table:
     asset = snapshot.asset_class
     ccy = snapshot.quote_ccy
-    has_24h = any(q.change_24h_pct is not None for q in snapshot.quotes)
+    has_24h = True
 
     title = f"terminex  ·  {_ASSET_TITLES[asset]} (quote {ccy})"
 
