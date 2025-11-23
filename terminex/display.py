@@ -68,12 +68,15 @@ def build_table(
     snapshot: Snapshot,
     previous: dict[str, float] | None = None,
     selected_index: int | None = None,
+    sort_indicator: str = "",
 ) -> Table:
     asset = snapshot.asset_class
     ccy = snapshot.quote_ccy
     has_24h = True
 
     title = f"terminex  ·  {_ASSET_TITLES[asset]} (quote {ccy})"
+    if sort_indicator:
+        title = f"{title}  ·  {sort_indicator}"
 
     caption_parts = [
         f"fetched {snapshot.fetched_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"

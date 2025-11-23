@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -19,7 +19,33 @@ from .providers.base import Provider, ProviderError
 from .providers.commodities_stooq import CommoditiesStooq
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.fx_erapi import FxERApi
-from .quote import Snapshot
+from .quote import Quote, Snapshot
+
+SORT_KEYS = ["default", "24h", "price"]
+
+
+def _sort_quotes(
+    quotes: list[Quote], key: str, desc: bool
+) -> list[Quote]:
+    if key == "default":
+        return list(quotes)
+    inf = float("inf")
+    if key == "24h":
+        keyfn = lambda q: (  # noqa: E731
+            q.change_24h_pct if q.change_24h_pct is not None else -inf
+        )
+    elif key == "price":
+        keyfn = lambda q: q.price  # noqa: E731
+    else:
+        return list(quotes)
+    return sorted(quotes, key=keyfn, reverse=desc)
+
+
+def _format_sort_indicator(key: str, desc: bool) -> str:
+    if key == "default":
+        return ""
+    arrow = "↓" if desc else "↑"
+    return f"sort: {key} {arrow}"
 
 TAB_KEYS = {"1": "fx", "2": "crypto", "3": "commodity"}
 TAB_ORDER = ["fx", "crypto", "commodity"]
@@ -34,6 +60,8 @@ class TabState:
     last_error: str | None = None
     last_fetch_attempt: float = 0.0
     selected_index: int = 0
+    sort_key: str = "default"
+    sort_desc: bool = True
 
     def clamp_selection(self) -> None:
         if self.last_snapshot is None:
@@ -108,10 +136,18 @@ class App:
 
         if state.last_snapshot is not None:
             state.clamp_selection()
+            sorted_quotes = _sort_quotes(
+                state.last_snapshot.quotes, state.sort_key, state.sort_desc
+            )
+            display_snap = replace(state.last_snapshot, quotes=sorted_quotes)
+            sort_indicator = _format_sort_indicator(
+                state.sort_key, state.sort_desc
+            )
             body = build_table(
-                state.last_snapshot,
+                display_snap,
                 state.previous_rates,
                 selected_index=state.selected_index,
+                sort_indicator=sort_indicator,
             )
         elif state.last_error is not None:
             body = Panel(
