@@ -204,6 +204,14 @@ class App:
                 state.selected_index = len(state.last_snapshot.quotes) - 1
                 state.clamp_selection()
             return True
+        if ch == "s":
+            i = SORT_KEYS.index(state.sort_key)
+            state.sort_key = SORT_KEYS[(i + 1) % len(SORT_KEYS)]
+            state.selected_index = 0
+            return True
+        if ch == "S":
+            state.sort_desc = not state.sort_desc
+            return True
         return False
 
     # ---- main loop ----
