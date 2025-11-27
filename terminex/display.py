@@ -69,12 +69,18 @@ def build_table(
     previous: dict[str, float] | None = None,
     selected_index: int | None = None,
     sort_indicator: str = "",
+    pinned_set: set[tuple[str, str]] | None = None,
+    current_tab_asset: str | None = None,
+    is_watchlist: bool = False,
 ) -> Table:
     asset = snapshot.asset_class
     ccy = snapshot.quote_ccy
-    has_24h = True
+    pinned_set = pinned_set or set()
 
-    title = f"terminex  ·  {_ASSET_TITLES[asset]} (quote {ccy})"
+    if is_watchlist:
+        title = f"terminex  ·  watchlist (quote {ccy})"
+    else:
+        title = f"terminex  ·  {_ASSET_TITLES[asset]} (quote {ccy})"
     if sort_indicator:
         title = f"{title}  ·  {sort_indicator}"
 
@@ -85,9 +91,11 @@ def build_table(
         caption_parts.append(
             f"provider {snapshot.provider_time.strftime('%Y-%m-%d %H:%M UTC')}"
         )
-    if snapshot.provider_name:
+    if snapshot.provider_name and not is_watchlist:
         caption_parts.append(f"via {snapshot.provider_name}")
-    caption_parts.append(r"\[1/2/3] tabs  \[r] refresh  \[q] quit")
+    caption_parts.append(
+        r"\[1/2/3/4] tabs  \[jk] nav  \[s] sort  \[w] pin  \[q] quit"
+    )
 
     table = Table(
         title=title,
@@ -97,19 +105,37 @@ def build_table(
         caption_style="dim",
         expand=False,
     )
+    table.add_column("★", justify="center", style="yellow", width=1)
     table.add_column("#", justify="right", style="dim", width=3)
-    table.add_column(_ASSET_SYMBOL_COLS[asset], style="bold")
-    table.add_column(_ASSET_NAME_COLS[asset])
-    table.add_column(
-        _ASSET_PRICE_COLS[asset].format(ccy=ccy), justify="right"
-    )
-    if has_24h:
-        table.add_column("24h %", justify="right")
+    if is_watchlist:
+        table.add_column("Asset", style="dim")
+        table.add_column("Symbol", style="bold")
+        table.add_column("Name")
+        table.add_column(f"Price ({ccy})", justify="right")
+    else:
+        table.add_column(_ASSET_SYMBOL_COLS[asset], style="bold")
+        table.add_column(_ASSET_NAME_COLS[asset])
+        table.add_column(
+            _ASSET_PRICE_COLS[asset].format(ccy=ccy), justify="right"
+        )
+    table.add_column("24h %", justify="right")
     table.add_column("Δ since last", justify="right")
 
     for idx, q in enumerate(snapshot.quotes, start=1):
-        if asset == "fx" and q.symbol == ccy:
-            price_text = Text(f"1.0000  (base)", style="bold yellow")
+        # decide pin glyph
+        row_asset = q.meta.get("source_tab") if is_watchlist else current_tab_asset
+        is_pinned = (
+            bool(row_asset) and (row_asset, q.symbol) in pinned_set
+        )
+        star = "★" if is_pinned else ""
+
+        is_pending = bool(q.meta.get("pending"))
+        if is_pending:
+            price_text = Text("loading…", style="dim")
+            pct_text = Text("—", style="dim")
+            delta_text = Text("—", style="dim")
+        elif (not is_watchlist) and asset == "fx" and q.symbol == ccy:
+            price_text = Text("1.0000  (base)", style="bold yellow")
             pct_text = Text("—", style="dim")
             delta_text = Text("—", style="dim")
         else:
@@ -118,10 +144,10 @@ def build_table(
             prev_val = previous.get(q.symbol) if previous else None
             delta_text = _delta_cell(q.price, prev_val)
 
-        row = [str(idx), q.symbol, q.name, price_text]
-        if has_24h:
-            row.append(pct_text)
-        row.append(delta_text)
+        row: list = [star, str(idx)]
+        if is_watchlist:
+            row.append(q.meta.get("source_label", "?"))
+        row += [q.symbol, q.name, price_text, pct_text, delta_text]
         row_style = "reverse" if selected_index == idx - 1 else None
         table.add_row(*row, style=row_style)
 

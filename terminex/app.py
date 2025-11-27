@@ -19,7 +19,9 @@ from .providers.base import Provider, ProviderError
 from .providers.commodities_stooq import CommoditiesStooq
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.fx_erapi import FxERApi
-from .quote import Quote, Snapshot
+from .providers.watchlist_agg import WatchlistAggregator
+from .quote import AssetClass, Quote, Snapshot
+from .watchlist import Pin, load as load_watchlist, save as save_watchlist
 
 SORT_KEYS = ["default", "24h", "price"]
 
@@ -47,9 +49,17 @@ def _format_sort_indicator(key: str, desc: bool) -> str:
     arrow = "↓" if desc else "↑"
     return f"sort: {key} {arrow}"
 
-TAB_KEYS = {"1": "fx", "2": "crypto", "3": "commodity"}
-TAB_ORDER = ["fx", "crypto", "commodity"]
-TAB_LABELS = {"fx": "FX", "crypto": "Crypto", "commodity": "Commodities"}
+TAB_KEYS = {"1": "fx", "2": "crypto", "3": "commodity", "4": "watchlist"}
+TAB_ORDER = ["fx", "crypto", "commodity", "watchlist"]
+TAB_LABELS = {
+    "fx": "FX",
+    "crypto": "Crypto",
+    "commodity": "Commodities",
+    "watchlist": "Watch",
+}
+SOURCE_TABS: list[str] = ["fx", "crypto", "commodity"]
+# Map tab name → AssetClass for watchlist pins
+TAB_TO_ASSET_CLASS = {"fx": "fx", "crypto": "crypto", "commodity": "commodity"}
 
 
 @dataclass
@@ -88,12 +98,78 @@ class App:
             ),
             "commodity": TabState(CommoditiesStooq()),
         }
+        self.watchlist = load_watchlist()
+        self.tabs["watchlist"] = TabState(
+            WatchlistAggregator(self.watchlist, self._lookup_pinned_quote)
+        )
         self.console = Console()
         self.should_quit = False
+        self._toast: tuple[str, float] | None = None  # (message, expires_at)
+
+    def _lookup_pinned_quote(
+        self, asset_class: AssetClass, symbol: str
+    ) -> Quote | None:
+        snap = self.tabs[asset_class].last_snapshot
+        if snap is None:
+            return None
+        for q in snap.quotes:
+            if q.symbol == symbol:
+                return q
+        return None
+
+    def _set_toast(self, message: str, seconds: float = 2.0) -> None:
+        self._toast = (message, time.monotonic() + seconds)
+
+    def _active_toast(self) -> str | None:
+        if self._toast is None:
+            return None
+        message, expires = self._toast
+        if time.monotonic() >= expires:
+            self._toast = None
+            return None
+        return message
+
+    def _current_row(self) -> tuple[str, str] | None:
+        """Return (asset_class, symbol) for the currently-selected row, or None."""
+        state = self.tabs[self.active_tab]
+        if state.last_snapshot is None:
+            return None
+        # apply current sort to match what's on screen
+        sorted_quotes = _sort_quotes(
+            state.last_snapshot.quotes, state.sort_key, state.sort_desc
+        )
+        if not sorted_quotes:
+            return None
+        idx = max(0, min(state.selected_index, len(sorted_quotes) - 1))
+        q = sorted_quotes[idx]
+        if self.active_tab == "watchlist":
+            ac = q.meta.get("source_tab")
+            return (ac, q.symbol) if ac else None
+        ac = TAB_TO_ASSET_CLASS.get(self.active_tab)
+        return (ac, q.symbol) if ac else None
+
+    def _toggle_pin(self) -> None:
+        row = self._current_row()
+        if row is None:
+            return
+        ac, sym = row
+        now_pinned = self.watchlist.toggle(ac, sym)
+        save_watchlist(self.watchlist)
+        if now_pinned:
+            self._set_toast(f"pinned {sym}")
+        else:
+            self._set_toast(f"unpinned {sym}")
 
     # ---- fetch / tab machinery ----
 
     def _refresh(self, tab_name: str) -> None:
+        # Watchlist reads from source tabs' already-fetched data.
+        # Ensure each source tab has at least attempted a fetch.
+        if tab_name == "watchlist":
+            for src in SOURCE_TABS:
+                src_state = self.tabs[src]
+                if src_state.last_snapshot is None and src_state.last_error is None:
+                    self._refresh(src)
         state = self.tabs[tab_name]
         state.last_fetch_attempt = time.monotonic()
         try:
@@ -106,6 +182,13 @@ class App:
             state.previous_rates = state.last_snapshot.as_rate_map()
         state.last_snapshot = snap
         state.last_error = None
+        # A source-tab refresh invalidates any existing watchlist snapshot.
+        if (
+            tab_name in SOURCE_TABS
+            and "watchlist" in self.tabs
+            and self.tabs["watchlist"].last_snapshot is not None
+        ):
+            self.tabs["watchlist"].last_fetch_attempt = 0.0
 
     def _needs_refresh(self, tab_name: str) -> bool:
         state = self.tabs[tab_name]
@@ -134,7 +217,21 @@ class App:
         state = self.tabs[self.active_tab]
         header = self._header()
 
-        if state.last_snapshot is not None:
+        is_watchlist_tab = self.active_tab == "watchlist"
+        empty_watchlist = is_watchlist_tab and not self.watchlist.pins
+
+        if empty_watchlist:
+            body = Panel(
+                Text(
+                    "No symbols pinned.\n"
+                    "Navigate to FX, Crypto, or Commodities, highlight a "
+                    "row with j/k, and press w to pin.",
+                    style="dim",
+                ),
+                title="terminex — Watch",
+                border_style="cyan",
+            )
+        elif state.last_snapshot is not None:
             state.clamp_selection()
             sorted_quotes = _sort_quotes(
                 state.last_snapshot.quotes, state.sort_key, state.sort_desc
@@ -143,11 +240,16 @@ class App:
             sort_indicator = _format_sort_indicator(
                 state.sort_key, state.sort_desc
             )
+            pinned_set = {(p.asset_class, p.symbol) for p in self.watchlist.pins}
+            current_tab_asset = TAB_TO_ASSET_CLASS.get(self.active_tab)
             body = build_table(
                 display_snap,
                 state.previous_rates,
                 selected_index=state.selected_index,
                 sort_indicator=sort_indicator,
+                pinned_set=pinned_set,
+                current_tab_asset=current_tab_asset,
+                is_watchlist=is_watchlist_tab,
             )
         elif state.last_error is not None:
             body = Panel(
@@ -161,12 +263,20 @@ class App:
                 border_style="dim",
             )
 
+        footer_parts = []
         if state.last_error is not None and state.last_snapshot is not None:
-            err = Text(
-                f"stale — last refresh failed: {state.last_error}",
-                style="red",
+            footer_parts.append(
+                Text(
+                    f"stale — last refresh failed: {state.last_error}",
+                    style="red",
+                )
             )
-            return Group(header, Text(""), body, Text(""), err)
+        toast = self._active_toast()
+        if toast:
+            footer_parts.append(Text(toast, style="bold yellow"))
+
+        if footer_parts:
+            return Group(header, Text(""), body, Text(""), *footer_parts)
         return Group(header, Text(""), body)
 
     # ---- keyboard ----
@@ -212,6 +322,12 @@ class App:
         if ch == "S":
             state.sort_desc = not state.sort_desc
             return True
+        if ch in ("w", "W"):
+            self._toggle_pin()
+            # Force a watchlist refresh so the next render reflects the change.
+            if self.tabs["watchlist"].last_snapshot is not None:
+                self.tabs["watchlist"].last_fetch_attempt = 0.0
+            return True
         return False
 
     # ---- main loop ----
@@ -241,6 +357,9 @@ class App:
                         break
                     if self._needs_refresh(self.active_tab):
                         self._refresh(self.active_tab)
+                        dirty = True
+                    # toast expiration forces a redraw
+                    if self._toast is not None and self._active_toast() is None:
                         dirty = True
                     if dirty:
                         live.update(self._render())
