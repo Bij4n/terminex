@@ -25,19 +25,29 @@ python3 forex.py
 
 ### Keys
 
-| Key   | Action                |
-|-------|-----------------------|
-| `1`   | FX tab                |
-| `2`   | Crypto tab            |
-| `3`   | Commodities tab       |
-| `r`   | Force refresh now     |
-| `q`   | Quit                  |
+| Key       | Action                                              |
+|-----------|-----------------------------------------------------|
+| `1/2/3/4` | Switch to FX / Crypto / Commodities / Watchlist tab |
+| `j` / `k` | Move highlighted row down / up                      |
+| `g` / `G` | Jump to first / last row                            |
+| `s`       | Cycle sort key: default → 24h → price               |
+| `S`       | Toggle sort direction                               |
+| `w`       | Toggle watchlist pin for the highlighted row        |
+| `r`       | Force refresh the current tab                       |
+| `q`       | Quit                                                |
 
 ### CLI options
 
 - `--base USD` — FX base currency (default: `USD`)
-- `--tab fx|crypto|commodity` — tab to start on
+- `--tab fx|crypto|commodity|watchlist` — tab to start on
 - `--interval 10` — refresh interval in seconds
+
+### Watchlist
+
+Highlight any row on the FX / Crypto / Commodities tabs and press `w` to
+pin it. Press `4` to see all pins across asset classes in a single
+unified view, sortable the same way as any other tab. Pins persist to
+`~/.config/terminex/watchlist.toml` and survive across runs.
 
 ## Data sources
 
