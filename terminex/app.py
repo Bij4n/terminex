@@ -14,6 +14,7 @@ from rich.text import Text
 
 from .config import Config, load as load_config
 from .display import build_table
+from .help import render_help_panel
 from .keyboard import KeyboardListener
 from .providers.base import Provider, ProviderError
 from .providers.commodities_stooq import CommoditiesStooq
@@ -105,6 +106,7 @@ class App:
         self.console = Console()
         self.should_quit = False
         self._toast: tuple[str, float] | None = None  # (message, expires_at)
+        self.show_help = False
 
     def _lookup_pinned_quote(
         self, asset_class: AssetClass, symbol: str
@@ -275,6 +277,9 @@ class App:
         if toast:
             footer_parts.append(Text(toast, style="bold yellow"))
 
+        if self.show_help:
+            return Group(header, Text(""), render_help_panel())
+
         if footer_parts:
             return Group(header, Text(""), body, Text(""), *footer_parts)
         return Group(header, Text(""), body)
@@ -327,6 +332,9 @@ class App:
             # Force a watchlist refresh so the next render reflects the change.
             if self.tabs["watchlist"].last_snapshot is not None:
                 self.tabs["watchlist"].last_fetch_attempt = 0.0
+            return True
+        if ch == "?":
+            self.show_help = not self.show_help
             return True
         return False
 
