@@ -32,7 +32,11 @@ python3 forex.py
 | `g` / `G` | Jump to first / last row                            |
 | `s`       | Cycle sort key: default → 24h → price               |
 | `S`       | Toggle sort direction                               |
+| `/`       | Filter by symbol or name substring (live)           |
+| `Esc`     | Clear filter / close help                           |
 | `w`       | Toggle watchlist pin for the highlighted row        |
+| `~`       | Toggle sparkline column                             |
+| `?`       | Toggle help overlay                                 |
 | `r`       | Force refresh the current tab                       |
 | `q`       | Quit                                                |
 
@@ -41,6 +45,20 @@ python3 forex.py
 - `--base USD` — FX base currency (default: `USD`)
 - `--tab fx|crypto|commodity|watchlist` — tab to start on
 - `--interval 10` — refresh interval in seconds
+
+### Filter
+
+Press `/` to enter live-filter mode and start typing. The table filters
+as you type against both symbol and name. Enter exits filter mode
+(keeping the filter active); Esc cancels and clears.
+
+### Sparklines
+
+Press `~` to toggle a 20-point sparkline column showing recent price
+movement. Series are built up from live polls — newly-started series
+start empty and fill in over time. Green means net up, red means net
+down. The column hides the natural units but makes trend-shape obvious
+at a glance.
 
 ### Watchlist
 

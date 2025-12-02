@@ -14,6 +14,9 @@ provider interface. Rows are keyboard-navigable (vim-style) and sortable.
   pin glyph, row highlight, sort indicator, watchlist layout
 - `terminex/config.py` — TOML config loader (XDG) + env overrides
 - `terminex/watchlist.py` — `Pin` / `Watchlist` + TOML round-trip
+- `terminex/sparkline.py` — Unicode block renderer for price series
+- `terminex/series.py` — `SeriesStore` ring buffers (per `(asset, symbol)`)
+- `terminex/help.py` — help overlay + filter input bar
 - `terminex/quote.py` — shared `Quote` / `Snapshot` dataclasses
 - `terminex/currencies.py` — BIS top-25 FX code list
 - `terminex/providers/base.py` — `Provider` ABC + `ProviderError`
