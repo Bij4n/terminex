@@ -121,6 +121,8 @@ class App:
         self.should_quit = False
         self._toast: tuple[str, float] | None = None  # (message, expires_at)
         self.show_help = False
+        self.input_mode: str = "normal"  # "normal" | "filter"
+        self.filter_buffer: str = ""
 
     def _lookup_pinned_quote(
         self, asset_class: AssetClass, symbol: str
@@ -308,6 +310,8 @@ class App:
 
     def _handle_key(self, ch: str) -> bool:
         """Return True if the display should re-render immediately."""
+        if self.input_mode == "filter":
+            return self._handle_filter_key(ch)
         if ch in ("q", "Q", "\x03", "\x04"):  # q, Q, Ctrl-C, Ctrl-D
             self.should_quit = True
             return True
@@ -355,6 +359,42 @@ class App:
             return True
         if ch == "?":
             self.show_help = not self.show_help
+            return True
+        if ch == "/":
+            self.input_mode = "filter"
+            self.filter_buffer = state.filter_query
+            return True
+        if ch == "\x1b":  # Esc clears any active filter
+            if state.filter_query:
+                state.filter_query = ""
+                state.selected_index = 0
+                return True
+        return False
+
+    def _handle_filter_key(self, ch: str) -> bool:
+        state = self.tabs[self.active_tab]
+        if ch == "\x1b":  # Esc cancels, clears filter
+            self.filter_buffer = ""
+            state.filter_query = ""
+            state.selected_index = 0
+            self.input_mode = "normal"
+            return True
+        if ch in ("\r", "\n"):  # Enter commits (keeps filter, exits mode)
+            state.filter_query = self.filter_buffer
+            self.input_mode = "normal"
+            return True
+        if ch in ("\x7f", "\x08"):  # backspace/DEL
+            self.filter_buffer = self.filter_buffer[:-1]
+            state.filter_query = self.filter_buffer
+            state.selected_index = 0
+            return True
+        if ch == "\x03":  # Ctrl-C while filtering → quit
+            self.should_quit = True
+            return True
+        if ch.isprintable() and len(ch) == 1:
+            self.filter_buffer += ch
+            state.filter_query = self.filter_buffer
+            state.selected_index = 0
             return True
         return False
 
