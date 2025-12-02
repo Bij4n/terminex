@@ -44,6 +44,16 @@ def _sort_quotes(
     return sorted(quotes, key=keyfn, reverse=desc)
 
 
+def _filter_quotes(quotes: list[Quote], query: str) -> list[Quote]:
+    if not query:
+        return list(quotes)
+    q = query.lower()
+    return [
+        quote for quote in quotes
+        if q in quote.symbol.lower() or q in quote.name.lower()
+    ]
+
+
 def _format_sort_indicator(key: str, desc: bool) -> str:
     if key == "default":
         return ""
@@ -73,16 +83,20 @@ class TabState:
     selected_index: int = 0
     sort_key: str = "default"
     sort_desc: bool = True
+    filter_query: str = ""
 
-    def clamp_selection(self) -> None:
-        if self.last_snapshot is None:
-            self.selected_index = 0
-            return
-        n = len(self.last_snapshot.quotes)
-        if n == 0:
+    def clamp_selection(self, visible_count: int | None = None) -> None:
+        if visible_count is None:
+            if self.last_snapshot is None:
+                self.selected_index = 0
+                return
+            visible_count = len(self.last_snapshot.quotes)
+        if visible_count <= 0:
             self.selected_index = 0
         else:
-            self.selected_index = max(0, min(self.selected_index, n - 1))
+            self.selected_index = max(
+                0, min(self.selected_index, visible_count - 1)
+            )
 
 
 class App:
@@ -136,9 +150,12 @@ class App:
         state = self.tabs[self.active_tab]
         if state.last_snapshot is None:
             return None
-        # apply current sort to match what's on screen
+        # apply filter + sort to match what's on screen
+        filtered = _filter_quotes(
+            state.last_snapshot.quotes, state.filter_query
+        )
         sorted_quotes = _sort_quotes(
-            state.last_snapshot.quotes, state.sort_key, state.sort_desc
+            filtered, state.sort_key, state.sort_desc
         )
         if not sorted_quotes:
             return None
@@ -234,9 +251,12 @@ class App:
                 border_style="cyan",
             )
         elif state.last_snapshot is not None:
-            state.clamp_selection()
+            filtered = _filter_quotes(
+                state.last_snapshot.quotes, state.filter_query
+            )
+            state.clamp_selection(visible_count=len(filtered))
             sorted_quotes = _sort_quotes(
-                state.last_snapshot.quotes, state.sort_key, state.sort_desc
+                filtered, state.sort_key, state.sort_desc
             )
             display_snap = replace(state.last_snapshot, quotes=sorted_quotes)
             sort_indicator = _format_sort_indicator(
