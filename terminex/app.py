@@ -14,7 +14,7 @@ from rich.text import Text
 
 from .config import Config, load as load_config
 from .display import build_table
-from .help import render_help_panel
+from .help import render_filter_bar, render_help_panel
 from .keyboard import KeyboardListener
 from .providers.base import Provider, ProviderError
 from .providers.commodities_stooq import CommoditiesStooq
@@ -257,24 +257,38 @@ class App:
                 state.last_snapshot.quotes, state.filter_query
             )
             state.clamp_selection(visible_count=len(filtered))
-            sorted_quotes = _sort_quotes(
-                filtered, state.sort_key, state.sort_desc
-            )
-            display_snap = replace(state.last_snapshot, quotes=sorted_quotes)
-            sort_indicator = _format_sort_indicator(
-                state.sort_key, state.sort_desc
-            )
-            pinned_set = {(p.asset_class, p.symbol) for p in self.watchlist.pins}
-            current_tab_asset = TAB_TO_ASSET_CLASS.get(self.active_tab)
-            body = build_table(
-                display_snap,
-                state.previous_rates,
-                selected_index=state.selected_index,
-                sort_indicator=sort_indicator,
-                pinned_set=pinned_set,
-                current_tab_asset=current_tab_asset,
-                is_watchlist=is_watchlist_tab,
-            )
+            if state.filter_query and not filtered:
+                body = Panel(
+                    Text(
+                        f"no matches for '{state.filter_query}'",
+                        style="dim",
+                    ),
+                    border_style="yellow",
+                )
+                sorted_quotes = None
+            else:
+                sorted_quotes = _sort_quotes(
+                    filtered, state.sort_key, state.sort_desc
+                )
+                display_snap = replace(
+                    state.last_snapshot, quotes=sorted_quotes
+                )
+                sort_indicator = _format_sort_indicator(
+                    state.sort_key, state.sort_desc
+                )
+                pinned_set = {
+                    (p.asset_class, p.symbol) for p in self.watchlist.pins
+                }
+                current_tab_asset = TAB_TO_ASSET_CLASS.get(self.active_tab)
+                body = build_table(
+                    display_snap,
+                    state.previous_rates,
+                    selected_index=state.selected_index,
+                    sort_indicator=sort_indicator,
+                    pinned_set=pinned_set,
+                    current_tab_asset=current_tab_asset,
+                    is_watchlist=is_watchlist_tab,
+                )
         elif state.last_error is not None:
             body = Panel(
                 Text(state.last_error, style="red"),
@@ -288,6 +302,14 @@ class App:
             )
 
         footer_parts = []
+        if self.input_mode == "filter":
+            footer_parts.append(render_filter_bar(self.filter_buffer))
+        elif state.filter_query:
+            indicator = Text()
+            indicator.append(" filter: ", style="black on yellow")
+            indicator.append(f" {state.filter_query} ", style="bold yellow")
+            indicator.append("  (Esc clears)", style="dim")
+            footer_parts.append(indicator)
         if state.last_error is not None and state.last_snapshot is not None:
             footer_parts.append(
                 Text(
