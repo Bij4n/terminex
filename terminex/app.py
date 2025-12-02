@@ -22,6 +22,7 @@ from .providers.crypto_coincap import CryptoCoinCap
 from .providers.fx_erapi import FxERApi
 from .providers.watchlist_agg import WatchlistAggregator
 from .quote import AssetClass, Quote, Snapshot
+from .series import SeriesStore
 from .watchlist import Pin, load as load_watchlist, save as save_watchlist
 
 SORT_KEYS = ["default", "24h", "price"]
@@ -123,6 +124,8 @@ class App:
         self.show_help = False
         self.input_mode: str = "normal"  # "normal" | "filter"
         self.filter_buffer: str = ""
+        self.series = SeriesStore()
+        self.show_sparklines = False
 
     def _lookup_pinned_quote(
         self, asset_class: AssetClass, symbol: str
@@ -203,6 +206,10 @@ class App:
             state.previous_rates = state.last_snapshot.as_rate_map()
         state.last_snapshot = snap
         state.last_error = None
+        # Append prices to per-symbol series (source tabs only — the
+        # watchlist is a derived view and would double-count).
+        if tab_name in SOURCE_TABS:
+            self.series.extend_from_snapshot(tab_name, snap.quotes)
         # A source-tab refresh invalidates any existing watchlist snapshot.
         if (
             tab_name in SOURCE_TABS
@@ -288,6 +295,9 @@ class App:
                     pinned_set=pinned_set,
                     current_tab_asset=current_tab_asset,
                     is_watchlist=is_watchlist_tab,
+                    series_getter=(
+                        self.series.get if self.show_sparklines else None
+                    ),
                 )
         elif state.last_error is not None:
             body = Panel(
@@ -381,6 +391,9 @@ class App:
             return True
         if ch == "?":
             self.show_help = not self.show_help
+            return True
+        if ch == "~":
+            self.show_sparklines = not self.show_sparklines
             return True
         if ch == "/":
             self.input_mode = "filter"

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from rich.table import Table
 from rich.text import Text
 
 from .quote import Snapshot
+from .sparkline import render as render_sparkline
+
+SeriesGetter = Callable[[str, str], list]
 
 _ASSET_TITLES = {
     "fx": "top 25 FX rates",
@@ -72,6 +77,7 @@ def build_table(
     pinned_set: set[tuple[str, str]] | None = None,
     current_tab_asset: str | None = None,
     is_watchlist: bool = False,
+    series_getter: SeriesGetter | None = None,
 ) -> Table:
     asset = snapshot.asset_class
     ccy = snapshot.quote_ccy
@@ -119,6 +125,8 @@ def build_table(
             _ASSET_PRICE_COLS[asset].format(ccy=ccy), justify="right"
         )
     table.add_column("24h %", justify="right")
+    if series_getter is not None:
+        table.add_column("Trend", justify="left", no_wrap=True)
     table.add_column("Δ since last", justify="right")
 
     for idx, q in enumerate(snapshot.quotes, start=1):
@@ -147,7 +155,12 @@ def build_table(
         row: list = [star, str(idx)]
         if is_watchlist:
             row.append(q.meta.get("source_label", "?"))
-        row += [q.symbol, q.name, price_text, pct_text, delta_text]
+        row += [q.symbol, q.name, price_text, pct_text]
+        if series_getter is not None:
+            series_key_asset = row_asset or asset
+            series = series_getter(series_key_asset, q.symbol)
+            row.append(render_sparkline(series, width=20))
+        row.append(delta_text)
         row_style = "reverse" if selected_index == idx - 1 else None
         table.add_row(*row, style=row_style)
 
