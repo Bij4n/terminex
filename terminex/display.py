@@ -7,6 +7,7 @@ from collections.abc import Callable
 from rich.table import Table
 from rich.text import Text
 
+from . import theme
 from .quote import Snapshot
 from .sparkline import render as render_sparkline
 
@@ -49,24 +50,22 @@ def _format_price(value: float) -> str:
 
 def _format_pct(value: float | None) -> Text:
     if value is None:
-        return Text("—", style="dim")
+        return Text("—", style=theme.NEUTRAL)
     if abs(value) < 1e-6:
-        return Text("0.00%", style="dim")
+        return Text("0.00%", style=theme.NEUTRAL)
     arrow = "▲" if value > 0 else "▼"
-    style = "green" if value > 0 else "red"
-    return Text(f"{arrow} {value:+.2f}%", style=style)
+    return Text(f"{arrow} {value:+.2f}%", style=theme.pct_style(value))
 
 
 def _delta_cell(current: float, previous: float | None) -> Text:
     if previous is None or previous == 0:
-        return Text("—", style="dim")
+        return Text("—", style=theme.NEUTRAL)
     diff = current - previous
     pct = (diff / previous) * 100.0
     if abs(pct) < 1e-6:
-        return Text("0.0000%", style="dim")
+        return Text("0.0000%", style=theme.NEUTRAL)
     arrow = "▲" if diff > 0 else "▼"
-    style = "green" if diff > 0 else "red"
-    return Text(f"{arrow} {pct:+.4f}%", style=style)
+    return Text(f"{arrow} {pct:+.4f}%", style=theme.pct_style(diff))
 
 
 def build_table(
@@ -106,15 +105,15 @@ def build_table(
     table = Table(
         title=title,
         caption="  ·  ".join(caption_parts),
-        header_style="bold cyan",
-        title_style="bold white",
-        caption_style="dim",
+        header_style=theme.HEADER_STYLE,
+        title_style=theme.TITLE_STYLE,
+        caption_style=theme.CAPTION_STYLE,
         expand=False,
     )
-    table.add_column("★", justify="center", style="yellow", width=1)
-    table.add_column("#", justify="right", style="dim", width=3)
+    table.add_column("★", justify="center", style=theme.STAR, width=1)
+    table.add_column("#", justify="right", style=theme.MUTED, width=3)
     if is_watchlist:
-        table.add_column("Asset", style="dim")
+        table.add_column("Asset", style=theme.MUTED)
         table.add_column("Symbol", style="bold")
         table.add_column("Name")
         table.add_column(f"Price ({ccy})", justify="right")
@@ -139,13 +138,13 @@ def build_table(
 
         is_pending = bool(q.meta.get("pending"))
         if is_pending:
-            price_text = Text("loading…", style="dim")
-            pct_text = Text("—", style="dim")
-            delta_text = Text("—", style="dim")
+            price_text = Text("loading…", style=theme.MUTED)
+            pct_text = Text("—", style=theme.NEUTRAL)
+            delta_text = Text("—", style=theme.NEUTRAL)
         elif (not is_watchlist) and asset == "fx" and q.symbol == ccy:
-            price_text = Text("1.0000  (base)", style="bold yellow")
-            pct_text = Text("—", style="dim")
-            delta_text = Text("—", style="dim")
+            price_text = Text("1.0000  (base)", style=theme.BASE)
+            pct_text = Text("—", style=theme.NEUTRAL)
+            delta_text = Text("—", style=theme.NEUTRAL)
         else:
             price_text = Text(_format_price(q.price))
             pct_text = _format_pct(q.change_24h_pct)

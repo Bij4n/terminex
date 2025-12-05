@@ -6,6 +6,8 @@ from collections.abc import Sequence
 
 from rich.text import Text
 
+from . import theme
+
 BLOCKS = "▁▂▃▄▅▆▇█"
 
 
@@ -18,7 +20,7 @@ def render(series: Sequence[float], width: int = 20) -> Text:
     """
     pts = list(series)[-width:]
     if not pts:
-        return Text(" " * width, style="dim")
+        return Text(" " * width, style=theme.MUTED)
 
     # Pad left with spaces so newly-started series don't stretch horizontally.
     pad = " " * (width - len(pts))
@@ -37,12 +39,12 @@ def render(series: Sequence[float], width: int = 20) -> Text:
     if len(pts) >= 2:
         first, last = pts[0], pts[-1]
         if last > first:
-            style = "green"
+            style = theme.UP
         elif last < first:
-            style = "red"
+            style = theme.DOWN
         else:
-            style = "cyan"
+            style = theme.ACCENT
     else:
-        style = "cyan"
+        style = theme.ACCENT
 
     return Text(pad + body, style=style)
