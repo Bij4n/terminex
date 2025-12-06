@@ -89,22 +89,13 @@ def build_table(
     if sort_indicator:
         title = f"{title}  ·  {sort_indicator}"
 
-    caption_parts = [
-        f"fetched {snapshot.fetched_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    ]
-    if snapshot.provider_time is not None:
-        caption_parts.append(
-            f"provider {snapshot.provider_time.strftime('%Y-%m-%d %H:%M UTC')}"
-        )
+    caption_parts: list[str] = []
     if snapshot.provider_name and not is_watchlist:
         caption_parts.append(f"via {snapshot.provider_name}")
-    caption_parts.append(
-        r"\[1/2/3/4] tabs  \[jk] nav  \[s] sort  \[w] pin  \[q] quit"
-    )
 
     table = Table(
         title=title,
-        caption="  ·  ".join(caption_parts),
+        caption="  ·  ".join(caption_parts) if caption_parts else None,
         header_style=theme.HEADER_STYLE,
         title_style=theme.TITLE_STYLE,
         caption_style=theme.CAPTION_STYLE,
