@@ -101,6 +101,7 @@ def build_table(
         caption_style=theme.CAPTION_STYLE,
         expand=False,
     )
+    table.add_column(" ", justify="left", width=1)  # selected-row pointer
     table.add_column("★", justify="center", style=theme.STAR, width=1)
     table.add_column("#", justify="right", style=theme.MUTED, width=3)
     if is_watchlist:
@@ -142,7 +143,11 @@ def build_table(
             prev_val = previous.get(q.symbol) if previous else None
             delta_text = _delta_cell(q.price, prev_val)
 
-        row: list = [star, str(idx)]
+        is_selected = selected_index == idx - 1
+        pointer = (
+            Text("▍", style=f"bold {theme.POINTER}") if is_selected else ""
+        )
+        row: list = [pointer, star, str(idx)]
         if is_watchlist:
             row.append(q.meta.get("source_label", "?"))
         row += [q.symbol, q.name, price_text, pct_text]
@@ -151,7 +156,7 @@ def build_table(
             series = series_getter(series_key_asset, q.symbol)
             row.append(render_sparkline(series, width=20))
         row.append(delta_text)
-        row_style = "reverse" if selected_index == idx - 1 else None
+        row_style = theme.HIGHLIGHT_ROW_STYLE if is_selected else None
         table.add_row(*row, style=row_style)
 
     return table
