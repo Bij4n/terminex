@@ -66,7 +66,7 @@ TAB_ORDER = ["fx", "crypto", "commodity", "watchlist"]
 TAB_LABELS = {
     "fx": "FX",
     "crypto": "Crypto",
-    "commodity": "Commodities",
+    "commodity": "Cmdty",
     "watchlist": "Watch",
 }
 SOURCE_TABS: list[str] = ["fx", "crypto", "commodity"]
@@ -227,18 +227,18 @@ class App:
     # ---- rendering ----
 
     def _header(self) -> Text:
-        parts: list[tuple[str, str]] = []
-        for i, tab in enumerate(TAB_ORDER, start=1):
-            label = f" {i} {TAB_LABELS[tab]} "
-            style = "black on cyan" if tab == self.active_tab else "cyan"
-            parts.append((label, style))
-            parts.append(("  ", ""))
+        from . import theme
         header = Text()
-        for text, style in parts:
-            header.append(text, style=style)
-        header.append(
-            f"  ·  refresh every {self.interval:g}s", style="dim"
-        )
+        for i, tab in enumerate(TAB_ORDER, start=1):
+            if tab == self.active_tab:
+                header.append(f" [{i}] ", style=theme.MUTED)
+                header.append(
+                    TAB_LABELS[tab], style=f"bold {theme.ACCENT} underline"
+                )
+            else:
+                header.append(f" [{i}] ", style=theme.MUTED)
+                header.append(TAB_LABELS[tab], style=theme.MUTED)
+            header.append("   ", style="")
         return header
 
     def _render(self):
