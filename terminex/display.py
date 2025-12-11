@@ -86,8 +86,6 @@ def build_table(
         title = f"terminex  ·  watchlist (quote {ccy})"
     else:
         title = f"terminex  ·  {_ASSET_TITLES[asset]} (quote {ccy})"
-    if sort_indicator:
-        title = f"{title}  ·  {sort_indicator}"
 
     caption_parts: list[str] = []
     if snapshot.provider_name and not is_watchlist:

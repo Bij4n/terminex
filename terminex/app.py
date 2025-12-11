@@ -16,6 +16,7 @@ from .config import Config, load as load_config
 from .display import build_table
 from .help import render_filter_bar, render_help_panel
 from .keyboard import KeyboardListener
+from .statusbar import render_status_bar
 from .providers.base import Provider, ProviderError
 from .providers.commodities_stooq import CommoditiesStooq
 from .providers.crypto_coincap import CryptoCoinCap
@@ -311,32 +312,50 @@ class App:
                 border_style="dim",
             )
 
-        footer_parts = []
-        if self.input_mode == "filter":
-            footer_parts.append(render_filter_bar(self.filter_buffer))
-        elif state.filter_query:
-            indicator = Text()
-            indicator.append(" filter: ", style="black on yellow")
-            indicator.append(f" {state.filter_query} ", style="bold yellow")
-            indicator.append("  (Esc clears)", style="dim")
-            footer_parts.append(indicator)
-        if state.last_error is not None and state.last_snapshot is not None:
-            footer_parts.append(
-                Text(
-                    f"stale — last refresh failed: {state.last_error}",
-                    style="red",
-                )
-            )
-        toast = self._active_toast()
-        if toast:
-            footer_parts.append(Text(toast, style="bold yellow"))
-
         if self.show_help:
             return Group(header, Text(""), render_help_panel())
 
-        if footer_parts:
-            return Group(header, Text(""), body, Text(""), *footer_parts)
-        return Group(header, Text(""), body)
+        status_line = self._build_status_line(state)
+        return Group(header, Text(""), body, Text(""), status_line)
+
+    def _build_status_line(self, state: TabState):
+        from . import theme
+        # Single status line at the bottom. Priority (highest first):
+        # filter input > toast > stale error > normal status bar.
+        if self.input_mode == "filter":
+            return render_filter_bar(self.filter_buffer)
+        toast = self._active_toast()
+        if toast:
+            return Text(f" {toast}", style=f"bold {theme.WARN}")
+        if (
+            state.last_error is not None
+            and state.last_snapshot is not None
+        ):
+            return Text(
+                f" stale — {state.last_error}", style=theme.ERROR
+            )
+        total = (
+            len(state.last_snapshot.quotes)
+            if state.last_snapshot is not None
+            else 0
+        )
+        visible = total
+        if total and state.filter_query:
+            from .app import _filter_quotes as _fq
+            visible = len(_fq(state.last_snapshot.quotes, state.filter_query))
+        return render_status_bar(
+            tab_label=TAB_LABELS[self.active_tab],
+            visible_count=visible,
+            total_count=total,
+            sort_key=state.sort_key,
+            sort_desc=state.sort_desc,
+            filter_query=state.filter_query,
+            fetched_at=(
+                state.last_snapshot.fetched_at
+                if state.last_snapshot is not None
+                else None
+            ),
+        )
 
     # ---- keyboard ----
 
