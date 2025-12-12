@@ -127,6 +127,7 @@ class App:
         self.filter_buffer: str = ""
         self.series = SeriesStore()
         self.show_sparklines = False
+        self._last_age: str = ""
 
     def _lookup_pinned_quote(
         self, asset_class: AssetClass, symbol: str
@@ -141,6 +142,20 @@ class App:
 
     def _set_toast(self, message: str, seconds: float = 2.0) -> None:
         self._toast = (message, time.monotonic() + seconds)
+
+    def _age_changed(self) -> bool:
+        from .statusbar import format_age
+        state = self.tabs[self.active_tab]
+        fetched_at = (
+            state.last_snapshot.fetched_at
+            if state.last_snapshot is not None
+            else None
+        )
+        current = format_age(fetched_at)
+        if current != self._last_age:
+            self._last_age = current
+            return True
+        return False
 
     def _active_toast(self) -> str | None:
         if self._toast is None:
@@ -482,6 +497,9 @@ class App:
                         dirty = True
                     # toast expiration forces a redraw
                     if self._toast is not None and self._active_toast() is None:
+                        dirty = True
+                    # refresh-age label changes force a redraw
+                    if not dirty and self._age_changed():
                         dirty = True
                     if dirty:
                         live.update(self._render())
