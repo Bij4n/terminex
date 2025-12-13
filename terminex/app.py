@@ -9,11 +9,10 @@ from dataclasses import dataclass, replace
 
 from rich.console import Console, Group
 from rich.live import Live
-from rich.panel import Panel
 from rich.text import Text
 
 from .config import Config, load as load_config
-from .display import build_table
+from .display import build_table, state_panel
 from .help import render_filter_bar, render_help_panel
 from .keyboard import KeyboardListener
 from .statusbar import render_status_bar
@@ -265,15 +264,12 @@ class App:
         empty_watchlist = is_watchlist_tab and not self.watchlist.pins
 
         if empty_watchlist:
-            body = Panel(
-                Text(
-                    "No symbols pinned.\n"
-                    "Navigate to FX, Crypto, or Commodities, highlight a "
-                    "row with j/k, and press w to pin.",
-                    style="dim",
-                ),
-                title="terminex — Watch",
-                border_style="cyan",
+            body = state_panel(
+                "No symbols pinned.\n"
+                "Navigate to FX, Crypto, or Commodities, highlight a row "
+                "with j/k, and press w to pin.",
+                title="Watch",
+                variant="neutral",
             )
         elif state.last_snapshot is not None:
             filtered = _filter_quotes(
@@ -281,12 +277,9 @@ class App:
             )
             state.clamp_selection(visible_count=len(filtered))
             if state.filter_query and not filtered:
-                body = Panel(
-                    Text(
-                        f"no matches for '{state.filter_query}'",
-                        style="dim",
-                    ),
-                    border_style="yellow",
+                body = state_panel(
+                    f"no matches for '{state.filter_query}'",
+                    variant="warn",
                 )
                 sorted_quotes = None
             else:
@@ -316,16 +309,13 @@ class App:
                     ),
                 )
         elif state.last_error is not None:
-            body = Panel(
-                Text(state.last_error, style="red"),
-                title=f"terminex — {TAB_LABELS[self.active_tab]} fetch error",
-                border_style="red",
+            body = state_panel(
+                state.last_error,
+                title=f"{TAB_LABELS[self.active_tab]} fetch error",
+                variant="error",
             )
         else:
-            body = Panel(
-                Text("loading...", style="dim"),
-                border_style="dim",
-            )
+            body = state_panel("loading…", variant="neutral")
 
         if self.show_help:
             return Group(header, Text(""), render_help_panel())

@@ -3,11 +3,39 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Literal
 
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 from . import theme
+
+Variant = Literal["neutral", "warn", "error"]
+
+_VARIANT_BORDER = {
+    "neutral": theme.PANEL_BORDER_NEUTRAL,
+    "warn": theme.PANEL_BORDER_WARN,
+    "error": theme.PANEL_BORDER_ERROR,
+}
+
+_VARIANT_TEXT_STYLE = {
+    "neutral": theme.DIM_TEXT,
+    "warn": theme.WARN,
+    "error": theme.ERROR,
+}
+
+
+def state_panel(
+    message: str, *, title: str | None = None, variant: Variant = "neutral"
+) -> Panel:
+    return Panel(
+        Text(message, style=_VARIANT_TEXT_STYLE[variant]),
+        title=title,
+        title_align="left",
+        border_style=_VARIANT_BORDER[variant],
+        padding=(1, 2),
+    )
 from .quote import Snapshot
 from .sparkline import render as render_sparkline
 
