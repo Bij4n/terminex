@@ -8,19 +8,39 @@ from rich.text import Text
 
 from . import theme
 
-BINDINGS: list[tuple[str, str]] = [
-    ("1 / 2 / 3 / 4", "switch to FX / Crypto / Commodities / Watchlist"),
-    ("j / k", "move selected row down / up"),
-    ("g / G", "jump to first / last row"),
-    ("s", "cycle sort: default → 24h → price"),
-    ("S", "toggle sort direction"),
-    ("/", "filter by symbol or name substring"),
-    ("Esc", "clear filter / close help"),
-    ("w", "toggle watchlist pin for highlighted row"),
-    ("~", "toggle sparkline column"),
-    ("r", "force refresh the current tab"),
-    ("?", "toggle this help overlay"),
-    ("q / Ctrl-C", "quit"),
+SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "Navigation",
+        [
+            ("1 / 2 / 3 / 4", "switch tab: FX / Crypto / Cmdty / Watch"),
+            ("j / k", "move selected row down / up"),
+            ("g / G", "jump to first / last row"),
+        ],
+    ),
+    (
+        "Sort & filter",
+        [
+            ("s", "cycle sort: default → 24h → price"),
+            ("S", "toggle sort direction"),
+            ("/", "filter by symbol or name substring"),
+            ("Esc", "clear filter / close help"),
+        ],
+    ),
+    (
+        "Watchlist & view",
+        [
+            ("w", "toggle watchlist pin for highlighted row"),
+            ("~", "toggle sparkline column"),
+            ("?", "toggle this help overlay"),
+        ],
+    ),
+    (
+        "System",
+        [
+            ("r", "force refresh the current tab"),
+            ("q / Ctrl-C", "quit"),
+        ],
+    ),
 ]
 
 
@@ -30,8 +50,17 @@ def render_help_panel() -> Panel:
     )
     table.add_column("Key", style=theme.HEADER_STYLE, no_wrap=True)
     table.add_column("Action")
-    for key, action in BINDINGS:
-        table.add_row(key, action)
+
+    for idx, (section_name, bindings) in enumerate(SECTIONS):
+        if idx > 0:
+            table.add_row("", "")  # spacer between sections
+        table.add_row(
+            "",
+            Text(section_name.upper(), style=f"bold {theme.ACCENT}"),
+        )
+        for key, action in bindings:
+            table.add_row(key, action)
+
     return Panel(
         table,
         title="terminex — keybindings",
