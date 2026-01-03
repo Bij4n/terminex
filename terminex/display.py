@@ -67,33 +67,31 @@ _ASSET_NAME_COLS = {
 
 
 def _format_price(value: float) -> str:
-    if value >= 10000:
-        return f"{value:,.2f}"
     if value >= 1000:
         return f"{value:,.2f}"
     if value >= 1:
-        return f"{value:,.4f}"
-    return f"{value:.6f}"
+        return f"{value:.4f}"
+    return f"{value:.5f}"
 
 
 def _format_pct(value: float | None) -> Text:
     if value is None:
-        return Text("—", style=theme.NEUTRAL)
-    if abs(value) < 1e-6:
-        return Text("0.00%", style=theme.NEUTRAL)
+        return Text("·", style=theme.NEUTRAL)
+    if abs(value) < 1e-4:
+        return Text("·", style=theme.NEUTRAL)
     arrow = "▲" if value > 0 else "▼"
     return Text(f"{arrow} {value:+.2f}%", style=theme.pct_style(value))
 
 
 def _delta_cell(current: float, previous: float | None) -> Text:
     if previous is None or previous == 0:
-        return Text("—", style=theme.NEUTRAL)
+        return Text("·", style=theme.NEUTRAL)
     diff = current - previous
     pct = (diff / previous) * 100.0
-    if abs(pct) < 1e-6:
-        return Text("0.0000%", style=theme.NEUTRAL)
+    if abs(pct) < 1e-4:
+        return Text("·", style=theme.NEUTRAL)
     arrow = "▲" if diff > 0 else "▼"
-    return Text(f"{arrow} {pct:+.4f}%", style=theme.pct_style(diff))
+    return Text(f"{arrow} {pct:+.2f}%", style=theme.pct_style(diff))
 
 
 def build_table(
@@ -157,12 +155,12 @@ def build_table(
         is_pending = bool(q.meta.get("pending"))
         if is_pending:
             price_text = Text("loading…", style=theme.MUTED)
-            pct_text = Text("—", style=theme.NEUTRAL)
-            delta_text = Text("—", style=theme.NEUTRAL)
+            pct_text = Text("·", style=theme.NEUTRAL)
+            delta_text = Text("·", style=theme.NEUTRAL)
         elif (not is_watchlist) and asset == "fx" and q.symbol == ccy:
-            price_text = Text("1.0000  (base)", style=theme.BASE)
-            pct_text = Text("—", style=theme.NEUTRAL)
-            delta_text = Text("—", style=theme.NEUTRAL)
+            price_text = Text("1.0000", style=theme.BASE)
+            pct_text = Text("·", style=theme.NEUTRAL)
+            delta_text = Text("·", style=theme.NEUTRAL)
         else:
             price_text = Text(_format_price(q.price))
             pct_text = _format_pct(q.change_24h_pct)
