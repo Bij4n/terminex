@@ -10,6 +10,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+from . import theme
 from .quote import Snapshot
 
 # Case-insensitive. Amount allows commas as thousand-separators and a
@@ -151,3 +156,42 @@ def _fmt(value: float) -> str:
     if value >= 1:
         return f"{value:.4f}"
     return f"{value:.6f}"
+
+
+def render_converter_panel(
+    buffer: str,
+    history: list[str],
+    error: str | None,
+) -> Panel:
+    table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+    table.add_column("")
+    if history:
+        for line in reversed(history):
+            table.add_row(Text(line, style=theme.MUTED))
+        table.add_row("")
+    # input line
+    input_line = Text()
+    input_line.append("convert>  ", style=f"bold {theme.ACCENT}")
+    input_line.append(buffer, style="bold white")
+    input_line.append("▏", style=f"bold {theme.WARN}")
+    table.add_row(input_line)
+    if error:
+        table.add_row(Text(error, style=theme.ERROR))
+    else:
+        table.add_row(
+            Text(
+                "  examples: 1 BTC in EUR · 500 EUR in JPY · 1 GC.F in EUR",
+                style=theme.MUTED,
+            )
+        )
+    table.add_row("")
+    table.add_row(
+        Text("Esc to close · Enter to compute", style=theme.MUTED)
+    )
+    return Panel(
+        table,
+        title="terminex — converter",
+        title_align="left",
+        border_style=theme.PANEL_BORDER_NEUTRAL,
+        padding=(1, 2),
+    )

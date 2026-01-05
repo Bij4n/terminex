@@ -323,6 +323,18 @@ class App:
         if self.show_help:
             return Group(header, Text(""), render_help_panel())
 
+        if self.input_mode == "converter":
+            from .converter import render_converter_panel
+            return Group(
+                header,
+                Text(""),
+                render_converter_panel(
+                    self.converter_buffer,
+                    self.converter_history,
+                    self.converter_error,
+                ),
+            )
+
         status_line = self._build_status_line(state)
         return Group(header, Text(""), body, Text(""), status_line)
 
