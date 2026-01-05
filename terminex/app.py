@@ -122,8 +122,11 @@ class App:
         self.should_quit = False
         self._toast: tuple[str, float] | None = None  # (message, expires_at)
         self.show_help = False
-        self.input_mode: str = "normal"  # "normal" | "filter"
+        self.input_mode: str = "normal"  # "normal" | "filter" | "converter"
         self.filter_buffer: str = ""
+        self.converter_buffer: str = ""
+        self.converter_history: list[str] = []
+        self.converter_error: str | None = None
         self.series = SeriesStore()
         self.show_sparklines = False
         self._last_age: str = ""
@@ -368,6 +371,8 @@ class App:
         """Return True if the display should re-render immediately."""
         if self.input_mode == "filter":
             return self._handle_filter_key(ch)
+        if self.input_mode == "converter":
+            return self._handle_converter_key(ch)
         if ch in ("q", "Q", "\x03", "\x04"):  # q, Q, Ctrl-C, Ctrl-D
             self.should_quit = True
             return True
@@ -423,11 +428,63 @@ class App:
             self.input_mode = "filter"
             self.filter_buffer = state.filter_query
             return True
+        if ch == "c":
+            self.input_mode = "converter"
+            self.converter_buffer = ""
+            self.converter_error = None
+            return True
         if ch == "\x1b":  # Esc clears any active filter
             if state.filter_query:
                 state.filter_query = ""
                 state.selected_index = 0
                 return True
+        return False
+
+    def _handle_converter_key(self, ch: str) -> bool:
+        from .converter import (
+            ParseError,
+            ResolveError,
+            build_usd_lookup,
+            evaluate,
+            format_result,
+        )
+        if ch == "\x1b":  # Esc exits
+            self.input_mode = "normal"
+            self.converter_buffer = ""
+            self.converter_error = None
+            return True
+        if ch == "\x03":  # Ctrl-C quits
+            self.should_quit = True
+            return True
+        if ch in ("\r", "\n"):  # Enter evaluates
+            expr = self.converter_buffer.strip()
+            if not expr:
+                return False
+            lookup = build_usd_lookup(
+                {
+                    "fx": self.tabs["fx"].last_snapshot,
+                    "crypto": self.tabs["crypto"].last_snapshot,
+                    "commodity": self.tabs["commodity"].last_snapshot,
+                }
+            )
+            try:
+                result = evaluate(expr, lookup)
+            except (ParseError, ResolveError) as exc:
+                self.converter_error = str(exc)
+                return True
+            self.converter_error = None
+            self.converter_history.insert(0, format_result(result))
+            self.converter_history = self.converter_history[:5]
+            self.converter_buffer = ""
+            return True
+        if ch in ("\x7f", "\x08"):  # backspace
+            self.converter_buffer = self.converter_buffer[:-1]
+            self.converter_error = None
+            return True
+        if ch.isprintable() and len(ch) == 1:
+            self.converter_buffer += ch
+            self.converter_error = None
+            return True
         return False
 
     def _handle_filter_key(self, ch: str) -> bool:
