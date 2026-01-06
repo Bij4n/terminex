@@ -33,9 +33,10 @@ python3 forex.py
 | `s`       | Cycle sort key: default → 24h → price               |
 | `S`       | Toggle sort direction                               |
 | `/`       | Filter by symbol or name substring (live)           |
-| `Esc`     | Clear filter / close help                           |
+| `Esc`     | Clear filter / close help / close converter        |
 | `w`       | Toggle watchlist pin for the highlighted row        |
 | `~`       | Toggle sparkline column                             |
+| `c`       | Open cross-rate calculator                          |
 | `?`       | Toggle help overlay                                 |
 | `r`       | Force refresh the current tab                       |
 | `q`       | Quit                                                |
@@ -59,6 +60,23 @@ movement. Series are built up from live polls — newly-started series
 start empty and fill in over time. Green means net up, red means net
 down. The column hides the natural units but makes trend-shape obvious
 at a glance.
+
+### Cross-rate calculator
+
+Press `c` to open an interactive conversion prompt that resolves across
+all three asset classes via USD pivot. Type expressions like:
+
+```
+1 BTC in EUR
+500 EUR in JPY
+1 GC.F in EUR
+1,000 USD in GBP
+```
+
+Press `Enter` to compute, `Esc` to close. The last 5 results stay
+visible above the prompt. Symbols are whatever is loaded in the
+fx / crypto / commodity tabs (commodity symbols use Stooq notation like
+`GC.F`, `CL.F`).
 
 ### Watchlist
 

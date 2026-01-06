@@ -35,6 +35,12 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ],
     ),
     (
+        "Converter",
+        [
+            ("c", "open cross-rate calculator"),
+        ],
+    ),
+    (
         "System",
         [
             ("r", "force refresh the current tab"),

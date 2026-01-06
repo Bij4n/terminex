@@ -17,6 +17,7 @@ provider interface. Rows are keyboard-navigable (vim-style) and sortable.
 - `terminex/sparkline.py` — Unicode block renderer for price series
 - `terminex/series.py` — `SeriesStore` ring buffers (per `(asset, symbol)`)
 - `terminex/help.py` — help overlay + filter input bar
+- `terminex/converter.py` — cross-rate parser, USD-pivot engine, panel renderer
 - `terminex/quote.py` — shared `Quote` / `Snapshot` dataclasses
 - `terminex/currencies.py` — BIS top-25 FX code list
 - `terminex/providers/base.py` — `Provider` ABC + `ProviderError`
