@@ -36,6 +36,7 @@ def render_status_bar(
     sort_desc: bool,
     filter_query: str,
     fetched_at: datetime | None,
+    active_alerts: int = 0,
 ) -> Text:
     bar = Text()
     bar.append(f" {tab_label} ", style=f"bold {theme.ACCENT}")
@@ -59,6 +60,12 @@ def render_status_bar(
         _sep(bar)
         bar.append("filter: ", style=theme.MUTED)
         bar.append(filter_query, style=f"bold {theme.WARN}")
+
+    if active_alerts > 0:
+        _sep(bar)
+        bar.append(f"{active_alerts} alert", style=f"bold {theme.WARN}")
+        if active_alerts != 1:
+            bar.append("s", style=f"bold {theme.WARN}")
 
     _sep(bar)
     bar.append(format_age(fetched_at), style=theme.MUTED)

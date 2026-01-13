@@ -20,9 +20,11 @@ from .providers.base import Provider, ProviderError
 from .providers.commodities_stooq import CommoditiesStooq
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.fx_erapi import FxERApi
+from .alert_engine import AlertEngine, FireEvent
 from .providers.watchlist_agg import WatchlistAggregator
 from .quote import AssetClass, Quote, Snapshot
 from .series import SeriesStore
+from .store import connect as connect_store
 from .watchlist import Pin, load as load_watchlist, save as save_watchlist
 
 SORT_KEYS = ["default", "24h", "price"]
@@ -130,6 +132,8 @@ class App:
         self.series = SeriesStore()
         self.show_sparklines = False
         self._last_age: str = ""
+        self.store = connect_store()
+        self.alert_engine = AlertEngine(self.store)
 
     def _lookup_pinned_quote(
         self, asset_class: AssetClass, symbol: str
@@ -141,6 +145,25 @@ class App:
             if q.symbol == symbol:
                 return q
         return None
+
+    def _handle_alert_fires(self, fires: list[FireEvent]) -> None:
+        import sys
+        # Terminal bell (best-effort)
+        try:
+            sys.stdout.write("\a")
+            sys.stdout.flush()
+        except OSError:
+            pass
+        # Toast summarizes the fires; multiple fires merged.
+        if len(fires) == 1:
+            f = fires[0]
+            message = (
+                f"⚠  {f.alert.symbol} {f.alert.op} {f.alert.threshold:g} "
+                f"(now {f.price:g})"
+            )
+        else:
+            message = f"⚠  {len(fires)} alerts fired"
+        self._set_toast(message, seconds=5.0)
 
     def _set_toast(self, message: str, seconds: float = 2.0) -> None:
         self._toast = (message, time.monotonic() + seconds)
@@ -228,6 +251,9 @@ class App:
         # watchlist is a derived view and would double-count).
         if tab_name in SOURCE_TABS:
             self.series.extend_from_snapshot(tab_name, snap.quotes)
+            fires = self.alert_engine.evaluate(snap, tab_name)
+            if fires:
+                self._handle_alert_fires(fires)
         # A source-tab refresh invalidates any existing watchlist snapshot.
         if (
             tab_name in SOURCE_TABS
@@ -363,6 +389,7 @@ class App:
         if total and state.filter_query:
             from .app import _filter_quotes as _fq
             visible = len(_fq(state.last_snapshot.quotes, state.filter_query))
+        from . import alerts as alerts_dao
         return render_status_bar(
             tab_label=TAB_LABELS[self.active_tab],
             visible_count=visible,
@@ -375,6 +402,7 @@ class App:
                 if state.last_snapshot is not None
                 else None
             ),
+            active_alerts=alerts_dao.count_active(self.store),
         )
 
     # ---- keyboard ----
