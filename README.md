@@ -6,21 +6,24 @@ A terminal dashboard for live prices across three asset classes:
 - **Crypto** — top 25 coins by market cap
 - **Commodities** — metals, energy, and agriculturals futures
 
-## Requirements
+## Install
 
-- Python 3.11+ (uses `tomllib`)
-- `requests`, `rich`
+Requires Python 3.11+.
 
 ```bash
-pip install -r requirements.txt
+pipx install terminex
+# or, from a local checkout:
+pipx install .
+# or editable for development:
+pip install -e .
 ```
 
 ## Run
 
 ```bash
+terminex
+# or without installing:
 python3 -m terminex
-# or, legacy entry point:
-python3 forex.py
 ```
 
 ### Keys
