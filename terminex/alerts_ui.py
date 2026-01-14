@@ -66,7 +66,9 @@ def render_alert_new_panel(draft: dict) -> Panel:
     )
 
 
-def render_alert_list_panel(alerts: list[Alert]) -> Panel:
+def render_alert_list_panel(
+    alerts: list[Alert], delete_buffer: str = ""
+) -> Panel:
     if not alerts:
         inner: Table | Text = Text("No alerts defined.", style=theme.MUTED)
     else:
@@ -97,9 +99,17 @@ def render_alert_list_panel(alerts: list[Alert]) -> Panel:
     body.add_column("")
     body.add_row(inner)
     body.add_row("")
+    # delete prompt
+    prompt = Text()
+    prompt.append("delete ID:  ", style=f"bold {theme.ACCENT}")
+    prompt.append(delete_buffer, style="bold white")
+    prompt.append("▏", style=f"bold {theme.WARN}")
+    body.add_row(prompt)
+    body.add_row("")
     body.add_row(
         Text(
-            "d <ID> delete alert  ·  Esc to close", style=theme.MUTED
+            "digits build ID  ·  Enter deletes  ·  Esc to close",
+            style=theme.MUTED,
         )
     )
     return Panel(

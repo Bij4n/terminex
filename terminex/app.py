@@ -130,6 +130,7 @@ class App:
         self.converter_history: list[str] = []
         self.converter_error: str | None = None
         self.alert_draft: dict | None = None  # active alert-creation modal state
+        self.alert_list_delete_buffer: str = ""
         self.series = SeriesStore()
         self.show_sparklines = False
         self._last_age: str = ""
@@ -370,6 +371,18 @@ class App:
                 render_alert_new_panel(self.alert_draft),
             )
 
+        if self.input_mode == "alert_list":
+            from . import alerts as alerts_dao
+            from .alerts_ui import render_alert_list_panel
+            return Group(
+                header,
+                Text(""),
+                render_alert_list_panel(
+                    alerts_dao.list_all(self.store),
+                    delete_buffer=self.alert_list_delete_buffer,
+                ),
+            )
+
         status_line = self._build_status_line(state)
         return Group(header, Text(""), body, Text(""), status_line)
 
@@ -424,6 +437,8 @@ class App:
             return self._handle_converter_key(ch)
         if self.input_mode == "alert_new":
             return self._handle_alert_new_key(ch)
+        if self.input_mode == "alert_list":
+            return self._handle_alert_list_key(ch)
         if ch in ("q", "Q", "\x03", "\x04"):  # q, Q, Ctrl-C, Ctrl-D
             self.should_quit = True
             return True
@@ -484,6 +499,10 @@ class App:
             self.converter_buffer = ""
             self.converter_error = None
             return True
+        if ch == "A":
+            self.input_mode = "alert_list"
+            self.alert_list_delete_buffer = ""
+            return True
         if ch == "a":
             row = self._current_row()
             if row is None:
@@ -509,6 +528,36 @@ class App:
                 state.filter_query = ""
                 state.selected_index = 0
                 return True
+        return False
+
+    def _handle_alert_list_key(self, ch: str) -> bool:
+        from . import alerts as alerts_dao
+        if ch == "\x1b":
+            self.input_mode = "normal"
+            self.alert_list_delete_buffer = ""
+            return True
+        if ch == "\x03":
+            self.should_quit = True
+            return True
+        if ch in ("\r", "\n"):
+            buf = self.alert_list_delete_buffer
+            if buf:
+                try:
+                    aid = int(buf)
+                    if alerts_dao.delete(self.store, aid):
+                        self._set_toast(f"deleted alert #{aid}")
+                    else:
+                        self._set_toast(f"no alert #{aid}")
+                except ValueError:
+                    pass
+            self.alert_list_delete_buffer = ""
+            return True
+        if ch in ("\x7f", "\x08"):
+            self.alert_list_delete_buffer = self.alert_list_delete_buffer[:-1]
+            return True
+        if ch.isdigit():
+            self.alert_list_delete_buffer += ch
+            return True
         return False
 
     def _handle_alert_new_key(self, ch: str) -> bool:
