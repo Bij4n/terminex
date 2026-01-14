@@ -35,9 +35,11 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ],
     ),
     (
-        "Converter",
+        "Converter & alerts",
         [
             ("c", "open cross-rate calculator"),
+            ("a", "create alert on highlighted row"),
+            ("A", "list and manage alerts"),
         ],
     ),
     (

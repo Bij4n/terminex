@@ -18,6 +18,10 @@ provider interface. Rows are keyboard-navigable (vim-style) and sortable.
 - `terminex/series.py` — `SeriesStore` ring buffers (per `(asset, symbol)`)
 - `terminex/help.py` — help overlay + filter input bar
 - `terminex/converter.py` — cross-rate parser, USD-pivot engine, panel renderer
+- `terminex/store.py` — SQLite scaffolding (WAL, XDG path, schema init)
+- `terminex/alerts.py` — Alert dataclass + CRUD DAO
+- `terminex/alert_engine.py` — threshold crossing detection with last-price tracking
+- `terminex/alerts_ui.py` — alert creation modal + list view panels
 - `terminex/quote.py` — shared `Quote` / `Snapshot` dataclasses
 - `terminex/currencies.py` — BIS top-25 FX code list
 - `terminex/providers/base.py` — `Provider` ABC + `ProviderError`

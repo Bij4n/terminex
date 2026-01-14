@@ -37,6 +37,8 @@ python3 forex.py
 | `w`       | Toggle watchlist pin for the highlighted row        |
 | `~`       | Toggle sparkline column                             |
 | `c`       | Open cross-rate calculator                          |
+| `a`       | Create alert on highlighted row                     |
+| `A`       | List / delete alerts                                |
 | `?`       | Toggle help overlay                                 |
 | `r`       | Force refresh the current tab                       |
 | `q`       | Quit                                                |
@@ -77,6 +79,31 @@ Press `Enter` to compute, `Esc` to close. The last 5 results stay
 visible above the prompt. Symbols are whatever is loaded in the
 fx / crypto / commodity tabs (commodity symbols use Stooq notation like
 `GC.F`, `CL.F`).
+
+### Price alerts
+
+Highlight any row and press `a` to open the alert-creation modal. The
+threshold field pre-fills with the current price. While the modal is
+open:
+
+- `0-9` / `.` — edit threshold
+- `<` / `>` — toggle the comparison operator
+- `r` — toggle recurring (one-shot by default)
+- `Enter` — create alert
+- `Esc` — cancel
+
+Alerts fire when the price *crosses* the threshold, not every tick
+while above/below it. On fire: terminal bell, toast in the status
+line, and a desktop notification via `notify-send` (Linux; silently
+skipped if unavailable). Non-recurring alerts auto-deactivate on first
+fire.
+
+Press `A` for the list view — browse all alerts, type an ID and press
+`Enter` to delete. The status bar shows the active-alert count.
+
+Alerts are stored in SQLite at
+`~/.local/share/terminex/terminex.db` (or `$XDG_DATA_HOME/terminex/`)
+and survive across runs.
 
 ### Watchlist
 
