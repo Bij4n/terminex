@@ -129,6 +129,7 @@ class App:
         self.converter_buffer: str = ""
         self.converter_history: list[str] = []
         self.converter_error: str | None = None
+        self.alert_draft: dict | None = None  # active alert-creation modal state
         self.series = SeriesStore()
         self.show_sparklines = False
         self._last_age: str = ""
@@ -361,6 +362,14 @@ class App:
                 ),
             )
 
+        if self.input_mode == "alert_new" and self.alert_draft is not None:
+            from .alerts_ui import render_alert_new_panel
+            return Group(
+                header,
+                Text(""),
+                render_alert_new_panel(self.alert_draft),
+            )
+
         status_line = self._build_status_line(state)
         return Group(header, Text(""), body, Text(""), status_line)
 
@@ -413,6 +422,8 @@ class App:
             return self._handle_filter_key(ch)
         if self.input_mode == "converter":
             return self._handle_converter_key(ch)
+        if self.input_mode == "alert_new":
+            return self._handle_alert_new_key(ch)
         if ch in ("q", "Q", "\x03", "\x04"):  # q, Q, Ctrl-C, Ctrl-D
             self.should_quit = True
             return True
@@ -473,11 +484,86 @@ class App:
             self.converter_buffer = ""
             self.converter_error = None
             return True
+        if ch == "a":
+            row = self._current_row()
+            if row is None:
+                return False
+            asset_class, symbol = row
+            # pre-fill threshold with current price rounded to 4 sig figs
+            price = self._lookup_pinned_quote(asset_class, symbol)
+            if price is None:
+                return False
+            self.alert_draft = {
+                "asset_class": asset_class,
+                "symbol": symbol,
+                "current_price": price.price,
+                "op": ">",
+                "threshold_buffer": f"{price.price:.4f}".rstrip("0").rstrip("."),
+                "recurring": False,
+                "error": None,
+            }
+            self.input_mode = "alert_new"
+            return True
         if ch == "\x1b":  # Esc clears any active filter
             if state.filter_query:
                 state.filter_query = ""
                 state.selected_index = 0
                 return True
+        return False
+
+    def _handle_alert_new_key(self, ch: str) -> bool:
+        from . import alerts as alerts_dao
+        draft = self.alert_draft
+        if draft is None:
+            self.input_mode = "normal"
+            return True
+        if ch == "\x1b":  # Esc
+            self.input_mode = "normal"
+            self.alert_draft = None
+            return True
+        if ch == "\x03":
+            self.should_quit = True
+            return True
+        if ch in ("\r", "\n"):  # Enter → create
+            try:
+                threshold = float(draft["threshold_buffer"])
+            except ValueError:
+                draft["error"] = "invalid threshold"
+                return True
+            if threshold <= 0:
+                draft["error"] = "threshold must be positive"
+                return True
+            alerts_dao.create(
+                self.store,
+                asset_class=draft["asset_class"],
+                symbol=draft["symbol"],
+                op=draft["op"],
+                threshold=threshold,
+                recurring=draft["recurring"],
+            )
+            self._set_toast(
+                f"alert created: {draft['symbol']} {draft['op']} "
+                f"{threshold:g}"
+                + (" (recurring)" if draft["recurring"] else "")
+            )
+            self.input_mode = "normal"
+            self.alert_draft = None
+            return True
+        if ch in (">", "<"):
+            draft["op"] = ch
+            draft["error"] = None
+            return True
+        if ch in ("r", "R"):
+            draft["recurring"] = not draft["recurring"]
+            return True
+        if ch in ("\x7f", "\x08"):  # backspace
+            draft["threshold_buffer"] = draft["threshold_buffer"][:-1]
+            draft["error"] = None
+            return True
+        if ch in "0123456789.":
+            draft["threshold_buffer"] += ch
+            draft["error"] = None
+            return True
         return False
 
     def _handle_converter_key(self, ch: str) -> bool:
