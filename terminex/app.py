@@ -149,6 +149,7 @@ class App:
         return None
 
     def _handle_alert_fires(self, fires: list[FireEvent]) -> None:
+        import subprocess
         import sys
         # Terminal bell (best-effort)
         try:
@@ -166,6 +167,29 @@ class App:
         else:
             message = f"⚠  {len(fires)} alerts fired"
         self._set_toast(message, seconds=5.0)
+        # Desktop notification (best-effort — silently skip if notify-send
+        # is missing or fails).
+        for f in fires:
+            body = (
+                f"{f.alert.symbol} {f.alert.op} {f.alert.threshold:g}  "
+                f"(now {f.price:g})"
+            )
+            try:
+                subprocess.run(
+                    [
+                        "notify-send",
+                        "--app-name=terminex",
+                        "--urgency=normal",
+                        "terminex alert",
+                        body,
+                    ],
+                    check=False,
+                    timeout=2.0,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+                pass
 
     def _set_toast(self, message: str, seconds: float = 2.0) -> None:
         self._toast = (message, time.monotonic() + seconds)
