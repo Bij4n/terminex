@@ -455,6 +455,12 @@ class App:
 
     def _handle_key(self, ch: str) -> bool:
         """Return True if the display should re-render immediately."""
+        # Help overlay eats Esc before anything else, so users can
+        # close it with the same muscle-memory key they use to close
+        # other modals.
+        if self.show_help and ch == "\x1b":
+            self.show_help = False
+            return True
         if self.input_mode == "filter":
             return self._handle_filter_key(ch)
         if self.input_mode == "converter":
