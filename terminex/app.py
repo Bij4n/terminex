@@ -759,6 +759,10 @@ class App:
             pass
         finally:
             kb.stop()
+            try:
+                self.store.close()
+            except Exception:
+                pass
         return 0
 
 
