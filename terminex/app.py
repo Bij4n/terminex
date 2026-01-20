@@ -542,6 +542,11 @@ class App:
             price = self._lookup_pinned_quote(asset_class, symbol)
             if price is None:
                 return False
+            if price.meta.get("pending") or price.price <= 0:
+                self._set_toast(
+                    f"cannot create alert for {symbol}: no price loaded yet"
+                )
+                return True
             self.alert_draft = {
                 "asset_class": asset_class,
                 "symbol": symbol,
