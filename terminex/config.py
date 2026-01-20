@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,7 +29,17 @@ def load(path: Path | None = None) -> Config:
     try:
         with p.open("rb") as f:
             data = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
+    except OSError as exc:
+        print(
+            f"terminex: could not read config at {p}: {exc}",
+            file=sys.stderr,
+        )
+        return _with_env(Config())
+    except tomllib.TOMLDecodeError as exc:
+        print(
+            f"terminex: ignoring malformed config at {p}: {exc}",
+            file=sys.stderr,
+        )
         return _with_env(Config())
 
     providers = data.get("providers") or {}
