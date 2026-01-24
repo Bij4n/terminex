@@ -115,6 +115,16 @@ pin it. Press `4` to see all pins across asset classes in a single
 unified view, sortable the same way as any other tab. Pins persist to
 `~/.config/terminex/watchlist.toml` and survive across runs.
 
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -t .
+```
+
+Stdlib `unittest` only, no extra dependencies. Covers the pure-logic
+modules (converter, alerts DAO & engine, watchlist, filter/sort
+helpers, age formatter).
+
 ## Data sources
 
 | Asset       | Provider            | Key required?     | Notes                              |
