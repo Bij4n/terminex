@@ -19,6 +19,7 @@ from .statusbar import render_status_bar
 from .providers.base import Provider, ProviderError
 from .providers.commodities_stooq import CommoditiesStooq
 from .providers.crypto_coincap import CryptoCoinCap
+from .providers.crypto_coingecko import CryptoCoinGecko
 from .providers.fx_erapi import FxERApi
 from .alert_engine import AlertEngine, FireEvent
 from .providers.watchlist_agg import WatchlistAggregator
@@ -109,11 +110,17 @@ class App:
         self.active_tab = (
             config.active_tab if config.active_tab in TAB_ORDER else "fx"
         )
+        # CoinCap v3 requires a key; fall back to the keyless CoinGecko
+        # public API when one isn't configured so the crypto tab works
+        # out of the box.
+        crypto_provider: Provider = (
+            CryptoCoinCap(api_key=config.coincap_api_key)
+            if config.coincap_api_key
+            else CryptoCoinGecko()
+        )
         self.tabs: dict[str, TabState] = {
             "fx": TabState(FxERApi(base=config.base_currency)),
-            "crypto": TabState(
-                CryptoCoinCap(api_key=config.coincap_api_key or None)
-            ),
+            "crypto": TabState(crypto_provider),
             "commodity": TabState(CommoditiesStooq()),
         }
         self.watchlist = load_watchlist()
