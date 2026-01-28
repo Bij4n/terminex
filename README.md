@@ -127,14 +127,16 @@ helpers, age formatter).
 
 ## Data sources
 
-| Asset       | Provider            | Key required?     | Notes                              |
-|-------------|---------------------|-------------------|------------------------------------|
-| FX          | `open.er-api.com`   | no                | updates ~hourly                    |
-| Crypto      | `rest.coincap.io`   | **yes** (free)    | top 25 by mcap, sub-minute data    |
-| Commodities | `stooq.com` (CSV)   | no                | 14 futures, ~15-min delayed        |
+| Asset       | Provider                          | Key required?   | Notes                           |
+|-------------|-----------------------------------|-----------------|---------------------------------|
+| FX          | `open.er-api.com`                 | no              | updates ~hourly                 |
+| Crypto      | `coingecko.com` (default)         | no              | top 25 by mcap, ~1 min cache    |
+| Crypto      | `rest.coincap.io` (if key set)    | yes (free)      | top 25 by mcap, sub-minute data |
+| Commodities | `stooq.com` (CSV)                 | no              | 14 futures, ~15-min delayed     |
 
-To enable the crypto tab, [grab a free CoinCap API
-key](https://coincap.io/) and export it:
+**Crypto tab works out of the box** via CoinGecko's public API. For
+faster / higher-rate data, [grab a free CoinCap API key](https://coincap.io/)
+and export it — terminex will automatically prefer it:
 
 ```bash
 export TERMINEX_COINCAP_KEY=your-key-here

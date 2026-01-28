@@ -26,7 +26,8 @@ provider interface. Rows are keyboard-navigable (vim-style) and sortable.
 - `terminex/currencies.py` — BIS top-25 FX code list
 - `terminex/providers/base.py` — `Provider` ABC + `ProviderError`
 - `terminex/providers/fx_erapi.py` — open.er-api.com FX provider
-- `terminex/providers/crypto_coincap.py` — CoinCap v3 crypto provider
+- `terminex/providers/crypto_coincap.py` — CoinCap v3 crypto provider (requires key)
+- `terminex/providers/crypto_coingecko.py` — CoinGecko public crypto provider (keyless default)
 - `terminex/providers/commodities_stooq.py` — Stooq CSV commodities
 - `terminex/providers/watchlist_agg.py` — synthetic provider composing
   pinned quotes from other tabs' snapshots (no network I/O)
@@ -58,7 +59,8 @@ other tab states.
 
 ## Known quirks
 
-- CoinCap v3 requires a free API key (v2 is deprecated/dead)
+- CoinCap v3 requires a free API key (v2 is deprecated/dead); CoinGecko
+  is used as the keyless default
 - Yahoo Finance's v7 quote API is rate-limited to 429 for unauthenticated
   requests; we use Stooq instead
 - Stooq reports some futures in non-standard units (silver/copper show
