@@ -11,7 +11,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import alerts as alerts_dao
-from .alerts import Alert
+from .alerts import Alert, _row_to_alert
 from .quote import Snapshot
 
 
@@ -67,17 +67,3 @@ def _is_triggered(alert: Alert, price: float, prev: float | None) -> bool:
             return False
         return prev is None or prev >= alert.threshold
     return False
-
-
-def _row_to_alert(row: sqlite3.Row) -> Alert:
-    return Alert(
-        id=row["id"],
-        asset_class=row["asset_class"],
-        symbol=row["symbol"],
-        op=row["op"],
-        threshold=row["threshold"],
-        recurring=bool(row["recurring"]),
-        active=bool(row["active"]),
-        created_at=row["created_at"],
-        last_fired_at=row["last_fired_at"],
-    )

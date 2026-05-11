@@ -16,13 +16,27 @@ from typing import Iterator
 # keypress.
 _ESC_FOLLOWUP_TIMEOUT = 0.02
 
+# Synthetic key tokens emitted for CSI sequences we care about.
+KEY_UP = "<up>"
+KEY_DOWN = "<down>"
+KEY_LEFT = "<left>"
+KEY_RIGHT = "<right>"
+
+# Final byte → synthetic token for simple (no-parameter) CSI sequences.
+_CSI_MAP: dict[str, str] = {
+    "A": KEY_UP,
+    "B": KEY_DOWN,
+    "C": KEY_RIGHT,
+    "D": KEY_LEFT,
+}
+
 
 class KeyboardListener:
     """Background thread that reads single keypresses from stdin.
 
-    Arrow keys and other multi-byte CSI sequences are drained and
-    dropped so they do not masquerade as a sequence of ordinary
-    keypresses (e.g. ``\\x1b`` + ``[`` + ``A``).
+    Arrow keys are decoded to synthetic tokens (``<up>``, ``<down>``,
+    ``<left>``, ``<right>``). Other multi-byte CSI sequences are drained
+    and discarded so they do not leak as stray keypresses.
     """
 
     def __init__(self) -> None:
@@ -40,8 +54,6 @@ class KeyboardListener:
         try:
             tty.setcbreak(fd)
         except Exception:
-            # Restore on partial init so we don't leave the terminal
-            # mode half-changed.
             termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
             raise
         self._fd = fd
@@ -66,10 +78,12 @@ class KeyboardListener:
                 return
             if ch == "\x1b" and fd is not None:
                 # Possible CSI/SS3 sequence (arrow keys, F-keys, etc).
-                # Peek briefly; if more bytes arrive, drain the sequence
-                # and drop it. Otherwise emit bare Esc.
+                # Peek briefly; if more bytes arrive, decode the sequence.
+                # Otherwise emit bare Esc.
                 if _has_pending(fd, _ESC_FOLLOWUP_TIMEOUT):
-                    _drain_csi(fd)
+                    token = _decode_csi(fd)
+                    if token:
+                        self._queue.put(token)
                     continue
             self._queue.put(ch)
 
@@ -87,32 +101,34 @@ def _has_pending(fd: int, timeout: float) -> bool:
     return bool(r)
 
 
-def _drain_csi(fd: int) -> None:
-    """Drain a CSI (``\\x1b[…letter``) or SS3 (``\\x1bO…letter``) sequence.
+def _decode_csi(fd: int) -> str | None:
+    """Read a CSI (``\\x1b[…``) or SS3 (``\\x1bO…``) sequence.
 
-    Reads one introducer byte then continues reading until a final byte
-    (``0x40``..``0x7E``) is seen or the input stalls. Bytes are consumed
-    and discarded.
+    Returns a synthetic key token for recognized sequences, or None
+    for unrecognized ones. Either way the bytes are consumed.
     """
     try:
         intro = sys.stdin.read(1)
     except (OSError, ValueError):
-        return
+        return None
     if intro not in ("[", "O"):
-        # Not a recognized CSI/SS3 — put the unknown byte on the queue
-        # as-is by ignoring it (safer than emitting a stray char).
-        return
-    # Read terminator (parameter/intermediate bytes range 0x20-0x3F,
-    # final byte 0x40-0x7E). Cap at a few bytes to avoid pathological
-    # input.
+        return None
+    # Accumulate parameter/intermediate bytes (0x20-0x3F) up to the
+    # final byte (0x40-0x7E). Cap to guard against pathological input.
+    param = ""
     for _ in range(8):
         if not _has_pending(fd, _ESC_FOLLOWUP_TIMEOUT):
-            return
+            break
         try:
             b = sys.stdin.read(1)
         except (OSError, ValueError):
-            return
+            return None
         if not b:
-            return
+            return None
         if 0x40 <= ord(b) <= 0x7E:
-            return
+            # Simple sequences ([A, [B, [C, [D) have no parameter bytes.
+            if not param:
+                return _CSI_MAP.get(b)
+            return None
+        param += b
+    return None

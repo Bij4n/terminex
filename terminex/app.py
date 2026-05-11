@@ -14,9 +14,9 @@ from rich.text import Text
 from .config import Config, load as load_config
 from .display import build_table, state_panel
 from .help import render_filter_bar, render_help_panel
-from .keyboard import KeyboardListener
+from .keyboard import KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, KeyboardListener
 from .statusbar import render_status_bar
-from .providers.base import Provider, ProviderError
+from .providers.base import Provider, ProviderError, RateLimitError
 from .providers.commodities_stooq import CommoditiesStooq
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.crypto_coingecko import CryptoCoinGecko
@@ -88,6 +88,7 @@ class TabState:
     sort_key: str = "default"
     sort_desc: bool = True
     filter_query: str = ""
+    backoff_until: float = 0.0  # monotonic timestamp; skip fetch if now < this
 
     def clamp_selection(self, visible_count: int | None = None) -> None:
         if visible_count is None:
@@ -138,11 +139,11 @@ class App:
         self.converter_error: str | None = None
         self.alert_draft: dict | None = None  # active alert-creation modal state
         self.alert_list_delete_buffer: str = ""
-        self.series = SeriesStore()
-        self.show_sparklines = False
-        self._last_age: str = ""
         self.store = connect_store()
         self.alert_engine = AlertEngine(self.store)
+        self.series = SeriesStore(db=self.store)
+        self.show_sparklines = False
+        self._last_age: str = ""
 
     def _lookup_pinned_quote(
         self, asset_class: AssetClass, symbol: str
@@ -272,6 +273,10 @@ class App:
         state.last_fetch_attempt = time.monotonic()
         try:
             snap = state.provider.fetch()
+        except RateLimitError as exc:
+            state.last_error = str(exc)
+            state.backoff_until = time.monotonic() + exc.retry_after
+            return
         except ProviderError as exc:
             state.last_error = str(exc)
             return
@@ -297,9 +302,15 @@ class App:
 
     def _needs_refresh(self, tab_name: str) -> bool:
         state = self.tabs[tab_name]
+        now = time.monotonic()
+        if now < state.backoff_until:
+            return False
         if state.last_snapshot is None and state.last_error is None:
             return True
-        return (time.monotonic() - state.last_fetch_attempt) >= self.interval
+        effective_interval = max(
+            self.interval, state.provider.min_poll_interval
+        )
+        return (now - state.last_fetch_attempt) >= effective_interval
 
     # ---- rendering ----
 
@@ -440,8 +451,7 @@ class App:
         )
         visible = total
         if total and state.filter_query:
-            from .app import _filter_quotes as _fq
-            visible = len(_fq(state.last_snapshot.quotes, state.filter_query))
+            visible = len(_filter_quotes(state.last_snapshot.quotes, state.filter_query))
         from . import alerts as alerts_dao
         return render_status_bar(
             tab_label=TAB_LABELS[self.active_tab],
@@ -479,6 +489,15 @@ class App:
         if ch in ("q", "Q", "\x03", "\x04"):  # q, Q, Ctrl-C, Ctrl-D
             self.should_quit = True
             return True
+        if ch in (KEY_LEFT, KEY_RIGHT):
+            idx = TAB_ORDER.index(self.active_tab)
+            delta = 1 if ch == KEY_RIGHT else -1
+            new_tab = TAB_ORDER[(idx + delta) % len(TAB_ORDER)]
+            if new_tab != self.active_tab:
+                self.active_tab = new_tab
+                if self.tabs[new_tab].last_snapshot is None:
+                    self._refresh(new_tab)
+            return True
         if ch in TAB_KEYS:
             new_tab = TAB_KEYS[ch]
             if new_tab != self.active_tab:
@@ -491,11 +510,11 @@ class App:
             self._refresh(self.active_tab)
             return True
         state = self.tabs[self.active_tab]
-        if ch == "j":
+        if ch in ("j", KEY_DOWN):
             state.selected_index += 1
             state.clamp_selection()
             return True
-        if ch == "k":
+        if ch in ("k", KEY_UP):
             state.selected_index -= 1
             state.clamp_selection()
             return True
@@ -779,12 +798,20 @@ class App:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    try:
+        from importlib.metadata import version as _pkg_version
+        _version = _pkg_version("terminex")
+    except Exception:
+        _version = "0.4.0"
     parser = argparse.ArgumentParser(
         prog="terminex",
         description=(
             "Live multi-asset dashboard: FX (top 25), crypto (top 25 by "
             "mcap), and commodity futures."
         ),
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {_version}"
     )
     parser.add_argument("--base", default=None, help="FX base currency")
     parser.add_argument(
@@ -803,19 +830,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     config = load_config()
     if args.base:
-        config = Config(
-            base_currency=args.base.upper(),
-            refresh_interval=config.refresh_interval,
-            active_tab=config.active_tab,
-            coincap_api_key=config.coincap_api_key,
-        )
+        config = replace(config, base_currency=args.base.upper())
     if args.tab:
-        config = Config(
-            base_currency=config.base_currency,
-            refresh_interval=config.refresh_interval,
-            active_tab=args.tab,
-            coincap_api_key=config.coincap_api_key,
-        )
+        config = replace(config, active_tab=args.tab)
     interval = args.interval if args.interval is not None else config.refresh_interval
     app = App(config=config, interval=interval)
     return app.run()

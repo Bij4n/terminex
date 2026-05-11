@@ -116,6 +116,9 @@ def build_table(
     caption_parts: list[str] = []
     if snapshot.provider_name and not is_watchlist:
         caption_parts.append(f"via {snapshot.provider_name}")
+    has_unit_notes = any(q.meta.get("unit_note") for q in snapshot.quotes)
+    if has_unit_notes:
+        caption_parts.append("† exchange pts (not USD/unit)")
 
     table = Table(
         title=title,
@@ -162,7 +165,10 @@ def build_table(
             pct_text = Text("·", style=theme.NEUTRAL)
             delta_text = Text("·", style=theme.NEUTRAL)
         else:
-            price_text = Text(_format_price(q.price))
+            price_str = _format_price(q.price)
+            if q.meta.get("unit_note"):
+                price_str += " †"
+            price_text = Text(price_str)
             pct_text = _format_pct(q.change_24h_pct)
             prev_val = previous.get(q.symbol) if previous else None
             delta_text = _delta_cell(q.price, prev_val)
