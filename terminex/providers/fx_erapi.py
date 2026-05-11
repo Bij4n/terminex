@@ -17,6 +17,8 @@ TIMEOUT = 10.0
 class FxERApi(Provider):
     name = "open.er-api.com"
     asset_class = "fx"
+    # open.er-api.com free tier updates rates hourly; polling faster wastes quota.
+    min_poll_interval: float = 300.0
 
     def __init__(self, base: str = "USD") -> None:
         self.base = base.upper()

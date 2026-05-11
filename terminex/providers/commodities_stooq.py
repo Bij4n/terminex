@@ -19,6 +19,11 @@ from .base import Provider, ProviderError
 API_URL_TEMPLATE = "https://stooq.com/q/l/?s={symbols}&f=sd2t2ohlcv&h&e=csv"
 TIMEOUT = 10.0
 
+# Symbols whose prices stooq reports in exchange points rather than USD per
+# physical unit (e.g. silver is in cents/oz, copper in cents/lb on COMEX).
+# We flag these rows so the display can annotate them.
+_EXCHANGE_POINT_SYMBOLS: frozenset[str] = frozenset({"SI.F", "HG.F"})
+
 # (stooq symbol, display name). Order determines table ordering.
 SYMBOLS: list[tuple[str, str]] = [
     ("gc.f", "Gold"),
@@ -76,6 +81,11 @@ class CommoditiesStooq(Provider):
             ts = _parse_stooq_ts(row.get("Date"), row.get("Time"))
             if ts is not None and (latest_ts is None or ts > latest_ts):
                 latest_ts = ts
+            meta = (
+                {"unit_note": "exchange pts"}
+                if sym in _EXCHANGE_POINT_SYMBOLS
+                else {}
+            )
             quotes.append(
                 Quote(
                     symbol=sym,
@@ -83,6 +93,7 @@ class CommoditiesStooq(Provider):
                     price=price,
                     quote_ccy="USD",
                     change_24h_pct=change_pct,
+                    meta=meta,
                 )
             )
 

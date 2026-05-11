@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import requests
 
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError
+from .base import Provider, ProviderError, RateLimitError
 
 API_URL = "https://rest.coincap.io/v3/assets"
 TIMEOUT = 10.0
@@ -34,9 +34,20 @@ class CryptoCoinCap(Provider):
                 headers=headers,
                 timeout=TIMEOUT,
             )
+        except requests.RequestException as exc:
+            raise ProviderError(f"request failed: {exc}") from exc
+
+        if resp.status_code == 429:
+            retry_after = float(resp.headers.get("Retry-After", 60))
+            raise RateLimitError(
+                "CoinCap rate limited — retrying automatically.",
+                retry_after=retry_after,
+            )
+
+        try:
             resp.raise_for_status()
             payload = resp.json()
-        except requests.RequestException as exc:
+        except requests.HTTPError as exc:
             raise ProviderError(f"request failed: {exc}") from exc
         except ValueError as exc:
             raise ProviderError(f"invalid json: {exc}") from exc
