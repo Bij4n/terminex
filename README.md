@@ -159,3 +159,36 @@ api_key = "your-coincap-key"
 ```
 
 Environment variables win over config file values.
+
+## Contributing
+
+Bug reports and pull requests are welcome at
+https://github.com/Bij4n/terminex/issues.
+
+**To run the project locally:**
+
+```bash
+git clone https://github.com/Bij4n/terminex.git
+cd terminex
+pip install -e .
+terminex
+```
+
+**To run the tests:**
+
+```bash
+python3 -m unittest discover -s tests -t .
+```
+
+No external services or API keys are needed to run the tests — they use
+only the stdlib and an in-memory SQLite database.
+
+**Guidelines:**
+
+- Keep dependencies minimal: stdlib + `requests` + `rich` only
+- Each provider must return a `Snapshot` of `Quote` objects — the
+  renderer must not branch on provider identity
+- New providers go in `terminex/providers/` and implement the `Provider`
+  ABC from `providers/base.py`
+- POSIX-only for now (keyboard handling uses `termios`/`tty`)
+- Run the test suite before opening a PR
