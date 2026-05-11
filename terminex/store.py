@@ -34,7 +34,37 @@ CREATE TABLE IF NOT EXISTS fires (
     price       REAL NOT NULL,
     FOREIGN KEY(alert_id) REFERENCES alerts(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS prices (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_class TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    price       REAL NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS prices_lookup
+    ON prices(asset_class, symbol, id);
 """
+
+# Retain this many price observations per (asset_class, symbol).
+_PRICES_KEEP = 50
+
+
+def _prune_prices(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        DELETE FROM prices
+        WHERE id NOT IN (
+            SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY asset_class, symbol
+                           ORDER BY id DESC
+                       ) AS rn
+                FROM prices
+            ) WHERE rn <= ?
+        )
+    """, (_PRICES_KEEP,))
 
 
 def db_path() -> Path:
@@ -53,4 +83,5 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.executescript(SCHEMA)
+    _prune_prices(conn)
     return conn
