@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0 (unreleased)
+## 0.6.0 (2026-11-04)
 
 Makes terminex survive a dead feed: every tab now has somewhere to go when
 its data source fails, and a daily check catches failures before users do.

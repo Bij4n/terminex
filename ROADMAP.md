@@ -39,7 +39,7 @@ Released 2026-11-04. See `CHANGELOG.md` for the full list.
   fire times in local time; units shown when creating one.
 - Python 3.13 and 3.14 in CI.
 
-## Phase 2: survive a dead feed (0.6.0)
+## Phase 2: survive a dead feed (released in 0.6.0, 2026-11-04)
 
 Goal: the next provider failure is caught by us, not by users.
 
