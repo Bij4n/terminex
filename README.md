@@ -36,19 +36,20 @@ python3 -m terminex
 | Key       | Action                                              |
 |-----------|-----------------------------------------------------|
 | `1/2/3/4` | Switch to FX / Crypto / Commodities / Watchlist tab |
-| `j` / `k` | Move highlighted row down / up                      |
+| `←` / `→` | Previous / next tab                                 |
+| `j` / `k` | Move highlighted row down / up (also `↓` / `↑`)     |
 | `g` / `G` | Jump to first / last row                            |
 | `s`       | Cycle sort key: default → 24h → price               |
 | `S`       | Toggle sort direction                               |
 | `/`       | Filter by symbol or name substring (live)           |
 | `Esc`     | Clear filter / close help / close converter         |
 | `w`       | Toggle watchlist pin for the highlighted row        |
-| `~`       | Toggle sparkline column                             |
+| `~`       | Toggle the 7-day trend column                       |
 | `c`       | Open cross-rate calculator                          |
 | `a`       | Create alert on highlighted row                     |
 | `A`       | List / delete alerts                                |
 | `?`       | Toggle help overlay                                 |
-| `r`       | Force refresh the current tab                       |
+| `r`       | Refresh now (says when, if the feed has nothing new) |
 | `q`       | Quit                                                |
 
 ## CLI options
@@ -57,6 +58,7 @@ python3 -m terminex
 terminex --base EUR        # FX base currency (default: USD)
 terminex --tab crypto      # start on a specific tab (fx|crypto|commodity|watchlist)
 terminex --interval 15     # refresh interval in seconds (default: 10)
+terminex --once            # print the current tab once and exit
 terminex --version         # print the installed version
 ```
 
@@ -68,7 +70,7 @@ Press `/` to enter live-filter mode. The table narrows as you type against both 
 
 ### Sparklines
 
-Press `~` to toggle the Trend column. Crypto and commodity rows show the last 7 days from the provider as soon as they load, with the 7-day change beside the line. FX has no free history, so FX rows draw from rates collected while terminex runs (stored in SQLite, so they survive restarts). Moves smaller than 0.5% stay close to flat, so a stablecoin's noise doesn't look like a crash. Green means up over the period, red means down.
+Press `~` to toggle the Trend column. Commodity rows, and crypto rows on the default CoinGecko feed, show the last 7 days as soon as they load, with the 7-day change beside the line. FX (and crypto on the CoinCap feed) has no free history, so those rows draw from prices collected while terminex runs, stored in SQLite so they survive restarts. Moves smaller than 0.5% stay close to flat, so a stablecoin's noise doesn't look like a crash. Green means up over the period, red means down.
 
 ### Cross-rate calculator
 
@@ -105,18 +107,27 @@ Alerts are stored in SQLite at `~/.local/share/terminex/terminex.db` (or `$XDG_D
 
 Press `w` on any row in the FX, Crypto, or Commodities tabs to pin it. Press `4` to see all pinned rows in a single unified view, sortable the same way as any other tab. Pins persist to `~/.config/terminex/watchlist.toml`.
 
+### Scripting
+
+When output isn't a terminal (`terminex | less`, `terminex > prices.txt`, cron), or with `--once`, terminex prints the current tab as a table and exits. It exits with status 1 and a message on stderr if the feed can't be reached. Alerts are not checked in this mode.
+
+```bash
+terminex --once --tab crypto
+terminex --tab commodity > commodities.txt
+```
+
 ## Data sources
 
 | Asset       | Provider                       | Key required? | Notes                         |
 |-------------|--------------------------------|---------------|-------------------------------|
 | FX          | `open.er-api.com`              | no            | updates ~hourly               |
 | Crypto      | `coingecko.com` (default)      | no            | top 25 by mcap, ~1 min cache  |
-| Crypto      | `rest.coincap.io` (if key set) | yes (free)    | top 25 by mcap, sub-minute    |
+| Crypto      | `rest.coincap.io` (if key set) | yes (free)    | top 25, sub-minute, no history |
 | Commodities | `finance.yahoo.com` (spark)    | no            | 14 futures, ~10 min delayed   |
 
 The commodities feed uses Yahoo Finance's public but undocumented spark endpoint. If Yahoo changes or limits it, the Commodities tab shows an error and the other tabs keep working.
 
-The crypto tab works out of the box via CoinGecko's public API. For higher-rate data, grab a free [CoinCap API key](https://coincap.io/) and export it — terminex automatically prefers it when present:
+The crypto tab works out of the box via CoinGecko's public API. For higher-rate data, grab a free [CoinCap API key](https://coincap.io/) and export it. terminex uses CoinCap whenever a key is set (it does not fall back to CoinGecko if CoinCap fails):
 
 ```bash
 export TERMINEX_COINCAP_KEY=your-key-here
@@ -147,7 +158,7 @@ Stdlib `unittest` only — no extra dependencies. Covers the pure-logic modules:
 
 ## Contributing
 
-Bug reports and pull requests are welcome at https://github.com/Bij4n/terminex/issues. See [ROADMAP.md](ROADMAP.md) for what's planned next.
+Bug reports and pull requests are welcome at https://github.com/Bij4n/terminex/issues. See [CHANGELOG.md](CHANGELOG.md) for what changed in each release and [ROADMAP.md](ROADMAP.md) for what's planned next.
 
 ```bash
 git clone https://github.com/Bij4n/terminex.git
