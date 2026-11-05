@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import shutil
+import sys
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,7 +64,21 @@ def load(path: Path | None = None) -> Watchlist:
     try:
         with p.open("rb") as f:
             data = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
+    except OSError as exc:
+        print(f"terminex: could not read watchlist at {p}: {exc}", file=sys.stderr)
+        return Watchlist()
+    except tomllib.TOMLDecodeError as exc:
+        # Keep the damaged file: the next pin rewrites watchlist.toml.
+        backup = p.with_name(p.name + ".bak")
+        try:
+            shutil.copyfile(p, backup)
+            kept = f"saved a copy as {backup}"
+        except OSError as copy_exc:
+            kept = f"could not save a copy ({copy_exc})"
+        print(
+            f"terminex: ignoring malformed watchlist at {p}: {exc}; {kept}",
+            file=sys.stderr,
+        )
         return Watchlist()
 
     pins_raw = data.get("pins") or []
@@ -82,4 +100,14 @@ def save(wl: Watchlist, path: Path | None = None) -> None:
         lines.append(f'asset_class = "{pin.asset_class}"')
         lines.append(f'symbol = "{pin.symbol}"')
         lines.append("")
-    p.write_text("\n".join(lines))
+    # Write a temp file and rename it, so a crash mid-write can't leave a
+    # truncated watchlist behind.
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        os.replace(tmp, p)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise

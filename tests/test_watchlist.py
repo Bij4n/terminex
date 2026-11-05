@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,7 +66,8 @@ class TestWatchlistPersistence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "bad.toml"
             p.write_text("this is = not = valid")
-            loaded = load(p)
+            with contextlib.redirect_stderr(io.StringIO()):
+                loaded = load(p)
             self.assertEqual(loaded.pins, [])
 
     def test_invalid_asset_class_skipped(self):
@@ -77,6 +80,46 @@ class TestWatchlistPersistence(unittest.TestCase):
             loaded = load(p)
             self.assertEqual(len(loaded.pins), 1)
             self.assertEqual(loaded.pins[0].symbol, "EUR")
+
+
+
+class TestCorruptWatchlist(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "watchlist.toml"
+        self.broken = '[[pins]]\nasset_class = "crypto"\nsymbol = \n[[pins'
+        self.path.write_text(self.broken)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _load(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            wl = load(self.path)
+        return wl, err.getvalue()
+
+    def test_warns_and_backs_up(self):
+        wl, err = self._load()
+        self.assertEqual(wl.pins, [])
+        self.assertIn("watchlist", err)
+        self.assertIn(".bak", err)
+        self.assertEqual(self.path.with_suffix(".toml.bak").read_text(), self.broken)
+
+    def test_next_save_keeps_the_backup(self):
+        wl, _ = self._load()
+        wl.add(Pin("fx", "USD"))
+        save(wl, self.path)
+        self.assertEqual(self.path.with_suffix(".toml.bak").read_text(), self.broken)
+        self.assertEqual(load(self.path).pins, [Pin("fx", "USD")])
+
+
+class TestAtomicSave(unittest.TestCase):
+    def test_no_temp_files_left_behind(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "watchlist.toml"
+            save(Watchlist(pins=[Pin("crypto", "BTC")]), path)
+            self.assertEqual(sorted(p.name for p in Path(d).iterdir()), ["watchlist.toml"])
 
 
 if __name__ == "__main__":
