@@ -67,7 +67,7 @@ Press `/` to enter live-filter mode. The table narrows as you type against both 
 
 ### Sparklines
 
-Press `~` to toggle a 20-point sparkline column built from live polls. Series start empty and fill in over time, so the longer terminex runs the richer the history. Green means net up, red means net down. The SQLite-backed series store persists across restarts so your sparklines survive a reboot.
+Press `~` to toggle the Trend column. Crypto and commodity rows show the last 7 days from the provider as soon as they load, with the 7-day change beside the line. FX has no free history, so FX rows draw from rates collected while terminex runs (stored in SQLite, so they survive restarts). Moves smaller than 0.5% stay close to flat, so a stablecoin's noise doesn't look like a crash. Green means up over the period, red means down.
 
 ### Cross-rate calculator
 

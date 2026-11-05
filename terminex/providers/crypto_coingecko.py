@@ -36,7 +36,10 @@ class CryptoCoinGecko(Provider):
                     "order": "market_cap_desc",
                     "per_page": self.limit,
                     "page": 1,
-                    "price_change_percentage": "24h",
+                    "price_change_percentage": "24h,7d",
+                    # A week of hourly prices for the trend column, in the
+                    # same request.
+                    "sparkline": "true",
                 },
                 timeout=TIMEOUT,
             )
@@ -85,6 +88,15 @@ class CryptoCoinGecko(Provider):
                 rank_i = int(rank) if rank is not None else None
             except (TypeError, ValueError):
                 rank_i = None
+            meta: dict = {}
+            if rank_i is not None:
+                meta["rank"] = rank_i
+            history = _history(entry.get("sparkline_in_7d"))
+            if history:
+                meta["history"] = history
+            change_7d = entry.get("price_change_percentage_7d_in_currency")
+            if isinstance(change_7d, (int, float)):
+                meta["change_7d_pct"] = float(change_7d)
             quotes.append(
                 Quote(
                     symbol=str(symbol).upper(),
@@ -92,7 +104,7 @@ class CryptoCoinGecko(Provider):
                     price=price_f,
                     quote_ccy="USD",
                     change_24h_pct=change_f,
-                    meta={"rank": rank_i} if rank_i is not None else {},
+                    meta=meta,
                 )
             )
 
@@ -104,3 +116,13 @@ class CryptoCoinGecko(Provider):
             provider_time=None,
             provider_name=self.name,
         )
+
+
+def _history(sparkline: object) -> list[float]:
+    """Hourly prices from ``sparkline_in_7d``, skipping gaps."""
+    if not isinstance(sparkline, dict):
+        return []
+    prices = sparkline.get("price")
+    if not isinstance(prices, list):
+        return []
+    return [float(p) for p in prices if isinstance(p, (int, float)) and p > 0]

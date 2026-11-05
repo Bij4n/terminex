@@ -41,6 +41,8 @@ from .sparkline import render as render_sparkline
 
 SeriesGetter = Callable[[str, str], list]
 
+TREND_WIDTH = 20
+
 _ASSET_TITLES = {
     "fx": "top 25 FX rates",
     "crypto": "top cryptocurrencies by market cap",
@@ -94,6 +96,20 @@ def _delta_cell(current: float, previous: float | None) -> Text:
     return Text(f"{arrow} {pct:+.2f}%", style=theme.pct_style(diff))
 
 
+def _trend_cell(q, asset: str, series_getter: SeriesGetter, is_watchlist: bool) -> Text:
+    """Provider history (7 days) when available, else the live series."""
+    history = q.meta.get("history")
+    if history:
+        return render_sparkline(
+            history, width=TREND_WIDTH, change_pct=q.meta.get("change_7d_pct")
+        )
+    series = series_getter(asset, q.symbol)
+    if is_watchlist and asset == "fx":
+        # Watchlist shows USD per unit; the FX tab's series is per-base rates.
+        series = [1.0 / v for v in series if v > 0]
+    return render_sparkline(series, width=TREND_WIDTH)
+
+
 def build_table(
     snapshot: Snapshot,
     previous: dict[str, float] | None = None,
@@ -143,7 +159,14 @@ def build_table(
             table.add_column("Unit", style=theme.MUTED)
     table.add_column("24h %", justify="right")
     if series_getter is not None:
-        table.add_column("Trend", justify="left", no_wrap=True)
+        has_history = any(q.meta.get("history") for q in snapshot.quotes)
+        if is_watchlist:
+            trend_title = "Trend"
+        elif has_history:
+            trend_title = "Trend (7d)"
+        else:
+            trend_title = "Trend (live)"
+        table.add_column(trend_title, justify="left", no_wrap=True)
     table.add_column("Δ since last", justify="right")
 
     for idx, q in enumerate(snapshot.quotes, start=1):
@@ -182,9 +205,7 @@ def build_table(
             row.append(f"/{unit}" if unit else "")
         row.append(pct_text)
         if series_getter is not None:
-            series_key_asset = row_asset or asset
-            series = series_getter(series_key_asset, q.symbol)
-            row.append(render_sparkline(series, width=20))
+            row.append(_trend_cell(q, row_asset or asset, series_getter, is_watchlist))
         row.append(delta_text)
         row_style = theme.HIGHLIGHT_ROW_STYLE if is_selected else None
         table.add_row(*row, style=row_style)

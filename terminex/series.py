@@ -50,6 +50,10 @@ class SeriesStore:
         if buf is None:
             buf = deque(maxlen=self.maxlen)
             self._buffers[key] = buf
+        if buf and buf[-1] == price:
+            # Unchanged price: no new information, and repeats made the
+            # trend line draw as a staircase.
+            return
         buf.append(price)
         if _persist and self._db is not None:
             self._db.execute(
