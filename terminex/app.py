@@ -185,9 +185,9 @@ class App:
         self.converter_error: str | None = None
         self.alert_draft: dict | None = None  # active alert-creation modal state
         self.alert_list_delete_buffer: str = ""
-        self.store, store_warning = open_store()
-        if store_warning:
-            print(f"terminex: {store_warning}", file=sys.stderr)
+        self.store, store_notices = open_store()
+        for notice in store_notices:
+            print(f"terminex: {notice}", file=sys.stderr)
         self.alert_engine = AlertEngine(self.store)
         self.series = SeriesStore(db=self.store)
         self.show_sparklines = False
