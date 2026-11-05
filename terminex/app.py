@@ -206,6 +206,7 @@ class App:
                 self._lookup_pinned_quote,
                 fx_usd_price=self._fx_usd_price,
                 source_failed=self._source_failed,
+                source_loaded=lambda tab: self.tabs[tab].last_snapshot is not None,
             )
         )
         self.console = console or Console()
