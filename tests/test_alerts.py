@@ -125,12 +125,22 @@ class TestAlertEngine(unittest.TestCase):
             threshold=160.0,
             recurring=True,
         )
-        self.engine.evaluate(_snap([Quote("JPY", "Y", 155.0, "USD")]), "fx")
+        self.engine.evaluate(_snap([Quote("JPY", "Y", 155.0, "USD")]), "fx")  # fires
         self.engine.evaluate(_snap([Quote("JPY", "Y", 162.0, "USD")]), "fx")  # crossed above
+        # Past the cooldown, crossing back below fires again.
+        self.conn.execute("UPDATE alerts SET last_fired_at = '2000-01-01T00:00:00+00:00'")
         fires = self.engine.evaluate(
             _snap([Quote("JPY", "Y", 158.0, "USD")]), "fx"
         )  # crossed back below
         self.assertEqual(len(fires), 1)
+
+    def test_recurring_cooldown_suppresses_rapid_refires(self):
+        alerts.create(self.conn, asset_class="fx", symbol="JPY", op="<",
+                      threshold=160.0, recurring=True)
+        self.engine.evaluate(_snap([Quote("JPY", "Y", 155.0, "USD")]), "fx")  # fires
+        self.engine.evaluate(_snap([Quote("JPY", "Y", 162.0, "USD")]), "fx")
+        fires = self.engine.evaluate(_snap([Quote("JPY", "Y", 158.0, "USD")]), "fx")
+        self.assertEqual(fires, [])  # hovering at the threshold doesn't spam
 
     def test_non_recurring_deactivates_on_fire(self):
         alerts.create(
@@ -163,6 +173,43 @@ class TestAlertEngine(unittest.TestCase):
             _snap([Quote("BTC", "B", 100.0, "USD")]), "fx"
         )
         self.assertEqual(fires, [])
+
+
+
+class TestTwoInstances(unittest.TestCase):
+    """Two terminex windows on one database must fire an alert once."""
+
+    def _engines(self, recurring: bool):
+        import tempfile
+        from pathlib import Path
+        from terminex.store import connect
+        self.tmp = tempfile.TemporaryDirectory()
+        path = Path(self.tmp.name) / "terminex.db"
+        a, b = connect(path), connect(path)
+        alerts.create(a, asset_class="crypto", symbol="BTC", op=">",
+                          threshold=100.0, recurring=recurring)
+        engines = [AlertEngine(a), AlertEngine(b)]
+        below = Snapshot("crypto", "USD", [Quote("BTC", "Bitcoin", 99.0, "USD")], datetime.now(tz=timezone.utc))
+        for e in engines:
+            e.evaluate(below, "crypto")
+        return engines, (a, b)
+
+    def _cross(self, recurring: bool) -> int:
+        engines, conns = self._engines(recurring)
+        above = Snapshot("crypto", "USD", [Quote("BTC", "Bitcoin", 101.0, "USD")], datetime.now(tz=timezone.utc))
+        fired = sum(len(e.evaluate(above, "crypto")) for e in engines)
+        stored = conns[0].execute("SELECT count(*) FROM fires").fetchone()[0]
+        for c in conns:
+            c.close()
+        self.tmp.cleanup()
+        self.assertEqual(stored, fired)
+        return fired
+
+    def test_one_shot_fires_once(self):
+        self.assertEqual(self._cross(recurring=False), 1)
+
+    def test_recurring_fires_once_per_crossing(self):
+        self.assertEqual(self._cross(recurring=True), 1)
 
 
 if __name__ == "__main__":

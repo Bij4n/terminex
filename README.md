@@ -95,7 +95,7 @@ Highlight any row and press `a` to open the alert-creation modal. The threshold 
 | `Enter`    | Create alert                   |
 | `Esc`      | Cancel                         |
 
-Alerts fire when a price *crosses* the threshold — not every tick while above or below it. On fire: terminal bell, status-line toast, and a desktop notification via `notify-send` (Linux; silently skipped if unavailable). Non-recurring alerts auto-deactivate after the first fire.
+Alerts fire when a price *crosses* the threshold — not every tick while above or below it. On fire: terminal bell, status-line toast, and a desktop notification via `notify-send` (Linux; silently skipped if unavailable). Non-recurring alerts auto-deactivate after the first fire. Recurring alerts re-arm after a 5-minute cooldown, so a price hovering at the threshold doesn't notify on every poll, and two terminex windows sharing a database never fire the same alert twice.
 
 Press `A` for the list view — browse all alerts, enter an ID and press `Enter` to delete. The status bar shows the active count.
 

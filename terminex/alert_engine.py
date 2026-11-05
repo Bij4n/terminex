@@ -45,10 +45,9 @@ class AlertEngine:
             key = (asset_class, alert.symbol)
             prev = self._last_price.get(key)
             triggered = _is_triggered(alert, price, prev)
-            if triggered:
-                alerts_dao.record_fire(self.conn, alert.id, price)
-                if not alert.recurring:
-                    alerts_dao.deactivate(self.conn, alert.id)
+            # claim_fire is atomic, so a second terminex on the same
+            # database seeing the same crossing does not fire it again.
+            if triggered and alerts_dao.claim_fire(self.conn, alert, price):
                 fires.append(FireEvent(alert=alert, price=price))
         # update last-seen prices for every symbol in this snapshot
         for sym, price in quote_by_sym.items():

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 Op = Literal[">", "<"]
@@ -95,6 +95,47 @@ def record_fire(
         "UPDATE alerts SET last_fired_at = ? WHERE id = ?",
         (ts, alert_id),
     )
+
+
+# A recurring alert re-arms this long after it fires. It stops a price that
+# hovers at the threshold from notifying on every poll, and it is longer
+# than the slowest feed's poll interval (FX, 5 min), so a second terminex
+# on the same database that sees the same crossing later does not fire it
+# again.
+RECURRING_COOLDOWN_SECONDS = 300
+
+
+def claim_fire(conn: sqlite3.Connection, alert: Alert, price: float) -> bool:
+    """Atomically take ownership of a fire; False if another instance won.
+
+    One-shot alerts are claimed by flipping ``active`` from 1 to 0;
+    recurring alerts by moving ``last_fired_at`` forward when it is older
+    than ``RECURRING_COOLDOWN_SECONDS``. Only the claimant records the fire.
+    """
+    now = datetime.now(tz=timezone.utc)
+    ts = now.isoformat(timespec="seconds")
+    if alert.recurring:
+        cutoff = (now - timedelta(seconds=RECURRING_COOLDOWN_SECONDS)).isoformat(
+            timespec="seconds"
+        )
+        cur = conn.execute(
+            "UPDATE alerts SET last_fired_at = ? WHERE id = ? AND active = 1"
+            " AND (last_fired_at IS NULL OR last_fired_at < ?)",
+            (ts, alert.id, cutoff),
+        )
+    else:
+        cur = conn.execute(
+            "UPDATE alerts SET active = 0, last_fired_at = ?"
+            " WHERE id = ? AND active = 1",
+            (ts, alert.id),
+        )
+    if cur.rowcount != 1:
+        return False
+    conn.execute(
+        "INSERT INTO fires (alert_id, fired_at, price) VALUES (?, ?, ?)",
+        (alert.id, ts, price),
+    )
+    return True
 
 
 def count_active(conn: sqlite3.Connection) -> int:
