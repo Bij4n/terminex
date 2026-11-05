@@ -11,7 +11,8 @@ its data source fails, and a daily check catches failures before users do.
   keyless); with a CoinCap key, CoinCap leads and the other two back it up.
   Commodities fall back from Yahoo's `query1` host to `query2`. The caption
   under the table names the feed in use, a failed feed rests for a few
-  minutes, and terminex switches back when it recovers.
+  minutes (or as long as its rate limit asks), and terminex switches back
+  when it recovers.
 - A daily canary (`scripts/canary.py`, `canary` workflow) checks every feed
   against its live API, fallbacks included, and keeps a GitHub issue open
   for each failing feed until it recovers.
@@ -22,6 +23,9 @@ its data source fails, and a daily check catches failures before users do.
 
 - A feed that answers with nothing usable (usually a format change
   upstream) now shows an error instead of an empty table.
+- A pinned coin that the serving feed doesn't list shows "(not in current
+  Crypto feed)" instead of "loading…", and "Δ since last" resets when the
+  serving feed changes instead of showing the gap between two feeds.
 
 ## 0.5.0 (2026-11-04)
 
