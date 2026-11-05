@@ -20,7 +20,7 @@ from .config import (
     parse_currency_code,
     parse_interval,
 )
-from .display import build_table, state_panel
+from .display import build_table, fit_hidden, scroll_offset, state_panel
 from .help import render_filter_bar, render_help_panel
 from .keyboard import KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, KeyboardListener
 from .statusbar import render_status_bar
@@ -129,6 +129,7 @@ class TabState:
     sort_desc: bool = True
     filter_query: str = ""
     backoff_until: float = 0.0  # monotonic timestamp; skip fetch if now < this
+    scroll_offset: int = 0  # first row shown when the table is taller than the terminal
 
     def clamp_selection(self, visible_count: int | None = None) -> None:
         if visible_count is None:
@@ -420,18 +421,24 @@ class App:
                     (p.asset_class, p.symbol) for p in self.watchlist.pins
                 }
                 current_tab_asset = TAB_TO_ASSET_CLASS.get(self.active_tab)
-                body = build_table(
-                    display_snap,
-                    state.previous_rates,
-                    selected_index=state.selected_index,
-                    sort_indicator=sort_indicator,
-                    pinned_set=pinned_set,
-                    current_tab_asset=current_tab_asset,
-                    is_watchlist=is_watchlist_tab,
-                    series_getter=(
-                        self.series.get if self.show_sparklines else None
-                    ),
-                )
+
+                def build(hidden, rows=None):
+                    return build_table(
+                        display_snap,
+                        state.previous_rates,
+                        selected_index=state.selected_index,
+                        sort_indicator=sort_indicator,
+                        pinned_set=pinned_set,
+                        current_tab_asset=current_tab_asset,
+                        is_watchlist=is_watchlist_tab,
+                        series_getter=(
+                            self.series.get if self.show_sparklines else None
+                        ),
+                        hidden=hidden,
+                        rows=rows,
+                    )
+
+                body = self._fit_to_terminal(build, state, len(sorted_quotes))
         elif state.last_error is not None:
             body = state_panel(
                 state.last_error,
@@ -478,6 +485,36 @@ class App:
 
         status_line = self._build_status_line(state)
         return Group(header, Text(""), body, Text(""), status_line)
+
+    # Lines around the table: tab header, blank, blank, status line.
+    _CHROME_LINES = 4
+
+    def _fit_to_terminal(self, build, state: TabState, total: int):
+        """Drop columns to fit the width, then window rows to fit the height.
+
+        Rows are one line each (every column is no_wrap), so the number of
+        rows that fit is the line budget minus the table's own chrome.
+        """
+        console = self.console
+        hidden = fit_hidden(build, console)
+        budget = console.size.height - self._CHROME_LINES
+        table = build(hidden)
+        lines = len(console.render_lines(table, console.options))
+        if lines <= budget or total == 0:
+            state.scroll_offset = 0
+            return table
+        visible = max(1, total - (lines - budget))
+        for _ in range(2):  # a scrolled table may gain a caption line
+            state.scroll_offset = scroll_offset(
+                state.selected_index, state.scroll_offset, visible, total
+            )
+            rows = slice(state.scroll_offset, state.scroll_offset + visible)
+            table = build(hidden, rows)
+            excess = len(console.render_lines(table, console.options)) - budget
+            if excess <= 0 or visible == 1:
+                break
+            visible = max(1, visible - excess)
+        return table
 
     def _build_status_line(self, state: TabState):
         from . import theme
