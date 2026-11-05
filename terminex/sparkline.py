@@ -19,12 +19,18 @@ LABEL_WIDTH = 8
 
 
 def sample(series: Sequence[float], width: int) -> list[float]:
-    """Reduce ``series`` to at most ``width`` points, keeping the latest."""
+    """Reduce ``series`` to at most ``width`` evenly spaced points.
+
+    The first and last points are always kept, so the line starts where
+    the period started and ends at the latest price.
+    """
     pts = list(series)
     n = len(pts)
     if n <= width:
         return pts
-    return [pts[min(n - 1, (i + 1) * n // width - 1)] for i in range(width)]
+    if width < 2:
+        return pts[-width:] if width else []
+    return [pts[round(i * (n - 1) / (width - 1))] for i in range(width)]
 
 
 def render(
@@ -40,7 +46,8 @@ def render(
     7-day change); without it the label is first → last of the series.
     Colour follows the sign of the change.
     """
-    pts = sample([p for p in series if p > 0], width)
+    valid = [p for p in series if p > 0]
+    pts = sample(valid, width)
     if len(pts) < 2:
         # One point is not a trend; a lone block only confuses.
         return Text("·".rjust(width) + " " * LABEL_WIDTH, style=theme.MUTED)
@@ -55,8 +62,9 @@ def render(
         for v in pts
     )
 
-    if change_pct is None and len(pts) >= 2:
-        change_pct = (pts[-1] - pts[0]) / pts[0] * 100
+    if change_pct is None:
+        # From the full series: sampling must not change the reported move.
+        change_pct = (valid[-1] - valid[0]) / valid[0] * 100
     if change_pct is None or abs(change_pct) < 0.005:
         style = theme.ACCENT
     else:

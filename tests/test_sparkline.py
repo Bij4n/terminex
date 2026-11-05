@@ -43,6 +43,11 @@ class TestRender(unittest.TestCase):
     def test_label_falls_back_to_first_last(self):
         self.assertTrue(render([100.0, 101.0]).plain.endswith("+1.00%"))
 
+    def test_change_uses_the_full_series_not_the_sample(self):
+        text = render([100.0] + [200.0] * 167, width=20)
+        self.assertTrue(text.plain.endswith("+100.0%"), text.plain)
+        self.assertEqual(_bars(text)[0], BLOCKS[0])  # first point survives sampling
+
     def test_width_is_constant(self):
         widths = {
             len(render(s, width=20).plain)
