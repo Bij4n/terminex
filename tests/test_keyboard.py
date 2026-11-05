@@ -62,7 +62,7 @@ class TestListenerOverPty(unittest.TestCase):
 
     def _drain_after(self, data: bytes) -> list[str]:
         os.write(self.master, data)
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + 3.0  # generous for busy CI runners; returns as soon as keys arrive
         keys: list[str] = []
         while time.monotonic() < deadline:
             keys.extend(self.kb.drain())
