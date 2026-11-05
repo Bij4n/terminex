@@ -15,6 +15,7 @@ from ..watchlist import Watchlist
 from .base import Provider
 
 QuoteLookup = Callable[[AssetClass, str], Quote | None]
+FxUsdPrice = Callable[[str], float | None]
 
 _TAB_LABELS: dict[AssetClass, str] = {
     "fx": "FX",
@@ -31,15 +32,25 @@ class WatchlistAggregator(Provider):
         self,
         watchlist: Watchlist,
         lookup: QuoteLookup,
+        fx_usd_price: FxUsdPrice | None = None,
     ) -> None:
         self.watchlist = watchlist
         self.lookup = lookup
+        # FX tab rates are "units per 1 base"; the watchlist column is
+        # USD per unit, so FX pins are converted through this callable.
+        self.fx_usd_price = fx_usd_price
 
     def fetch(self) -> Snapshot:
         quotes: list[Quote] = []
         for pin in self.watchlist.pins:
             q = self.lookup(pin.asset_class, pin.symbol)
-            if q is None:
+            price = q.price if q is not None else None
+            extra: dict = {}
+            if q is not None and pin.asset_class == "fx":
+                usd = self.fx_usd_price(q.symbol) if self.fx_usd_price else None
+                price = usd
+                extra = {"fx_rate": q.price}
+            if q is None or price is None:
                 # source snapshot not loaded yet — render as placeholder
                 quotes.append(
                     Quote(
@@ -60,11 +71,12 @@ class WatchlistAggregator(Provider):
                 Quote(
                     symbol=q.symbol,
                     name=q.name,
-                    price=q.price,
-                    quote_ccy=q.quote_ccy,
+                    price=price,
+                    quote_ccy="USD",
                     change_24h_pct=q.change_24h_pct,
                     meta={
                         **q.meta,
+                        **extra,
                         "source_tab": pin.asset_class,
                         "source_label": _TAB_LABELS[pin.asset_class],
                     },

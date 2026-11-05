@@ -166,7 +166,11 @@ class App:
         }
         self.watchlist = load_watchlist()
         self.tabs["watchlist"] = TabState(
-            WatchlistAggregator(self.watchlist, self._lookup_pinned_quote)
+            WatchlistAggregator(
+                self.watchlist,
+                self._lookup_pinned_quote,
+                fx_usd_price=self._fx_usd_price,
+            )
         )
         self.console = Console()
         self.should_quit = False
@@ -195,6 +199,13 @@ class App:
             if q.symbol == symbol:
                 return q
         return None
+
+    def _fx_usd_price(self, code: str) -> float | None:
+        from .converter import fx_usd_per_unit
+        snap = self.tabs["fx"].last_snapshot
+        if snap is None:
+            return None
+        return fx_usd_per_unit(snap).get(code.upper())
 
     def _handle_alert_fires(self, fires: list[FireEvent]) -> None:
         import subprocess
