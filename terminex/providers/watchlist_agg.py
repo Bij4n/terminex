@@ -51,12 +51,17 @@ class WatchlistAggregator(Provider):
         for pin in self.watchlist.pins:
             q = self.lookup(pin.asset_class, pin.symbol)
             price = q.price if q is not None else None
-            # Trend series to draw: same units as the price column.
-            extra: dict = {"series_key": (pin.asset_class, pin.symbol)}
+            # Trend series to draw, in the same units as the price column.
+            # Placeholder rows need it too: stored history still draws.
+            series_key = (
+                (FX_USD, pin.symbol)
+                if pin.asset_class == "fx"
+                else (pin.asset_class, pin.symbol)
+            )
+            extra: dict = {"series_key": series_key}
             if q is not None and pin.asset_class == "fx":
-                usd = self.fx_usd_price(q.symbol) if self.fx_usd_price else None
-                price = usd
-                extra = {"fx_rate": q.price, "series_key": (FX_USD, pin.symbol)}
+                price = self.fx_usd_price(q.symbol) if self.fx_usd_price else None
+                extra["fx_rate"] = q.price
             if q is None or price is None:
                 label = _TAB_LABELS[pin.asset_class]
                 failed = bool(self.source_failed and self.source_failed(pin.asset_class))
@@ -70,6 +75,7 @@ class WatchlistAggregator(Provider):
                         meta={
                             "source_tab": pin.asset_class,
                             "source_label": label,
+                            "series_key": series_key,
                             "unavailable" if failed else "pending": True,
                         },
                     )

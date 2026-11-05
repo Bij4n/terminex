@@ -35,6 +35,15 @@ class TestWatchlistPrices(unittest.TestCase):
         self.assertEqual(rows["EUR"].meta["series_key"], (FX_USD, "EUR"))
         self.assertEqual(rows["BTC"].meta["series_key"], ("crypto", "BTC"))
 
+    def test_placeholder_rows_keep_their_series_key(self):
+        from terminex.series import FX_USD
+        self.usd = {}  # FX loaded but no USD price yet -> placeholder row
+        self.assertEqual(self._fetch()["EUR"].meta["series_key"], (FX_USD, "EUR"))
+        agg = WatchlistAggregator(self.watchlist, lambda ac, sym: None,
+                                  source_failed=lambda ac: True)
+        rows = {q.symbol: q for q in agg.fetch().quotes}
+        self.assertEqual(rows["EUR"].meta["series_key"], (FX_USD, "EUR"))
+
     def test_fx_pin_keeps_original_rate_in_meta(self):
         self.assertEqual(self._fetch()["EUR"].meta["fx_rate"], 0.889912)
 
