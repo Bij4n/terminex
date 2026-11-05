@@ -35,8 +35,8 @@ Ready to release. See `CHANGELOG.md` for the full list.
 - Arrow keys, SIGTERM/SIGHUP cleanup, config and argument validation,
   validated API payloads, a corrupt watchlist backed up rather than replaced,
   and an in-memory fallback when the data directory isn't writable.
-- Alerts fire once across terminex windows; recurring alerts cool down for
-  5 minutes; fire times in local time; units shown when creating one.
+- Alerts fire once per crossing across terminex windows and restarts;
+  fire times in local time; units shown when creating one.
 - Python 3.13 and 3.14 in CI.
 
 ## Phase 2: survive a dead feed

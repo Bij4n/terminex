@@ -32,10 +32,12 @@ and sortable. Plans live in `ROADMAP.md`; every user-visible change goes in
   (`fx_usd_per_unit`, `build_usd_lookup`), panel renderer
 - `terminex/store.py` — SQLite scaffolding (WAL, XDG path, schema init),
   `open_store` (in-memory fallback + startup notices), versioned migrations
-  via `PRAGMA user_version` (v1: commodity alert thresholds cents → dollars)
-- `terminex/alerts.py` — Alert dataclass + CRUD DAO; `claim_fire` makes a
-  fire atomic across instances, recurring alerts cool down 5 min
-- `terminex/alert_engine.py` — threshold crossing detection with last-price tracking
+  via `PRAGMA user_version` (v1: commodity alert thresholds cents → dollars;
+  v2: `alerts.armed`)
+- `terminex/alerts.py` — Alert dataclass + CRUD DAO; alerts are armed/disarmed
+  in the DB: `claim_fire` atomically disarms (and deactivates one-shots),
+  `rearm` when the condition is false again
+- `terminex/alert_engine.py` — fires armed alerts whose condition holds, re-arms the rest
 - `terminex/alerts_ui.py` — alert creation modal + list view panels
 - `terminex/quote.py` — shared `Quote` / `Snapshot` dataclasses
 - `terminex/currencies.py` — BIS top-25 FX code list

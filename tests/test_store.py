@@ -85,5 +85,30 @@ class TestCommodityUnitMigration(unittest.TestCase):
             conn.close()
 
 
+
+class TestArmedColumnMigration(unittest.TestCase):
+    def test_old_alerts_table_gains_armed(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "terminex" / "terminex.db"
+            path.parent.mkdir(parents=True)
+            old = sqlite3.connect(path)
+            old.executescript(
+                "CREATE TABLE alerts (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " asset_class TEXT NOT NULL, symbol TEXT NOT NULL, op TEXT NOT NULL,"
+                " threshold REAL NOT NULL, recurring INTEGER NOT NULL DEFAULT 0,"
+                " active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,"
+                " last_fired_at TEXT);"
+                "INSERT INTO alerts (asset_class, symbol, op, threshold, created_at)"
+                " VALUES ('crypto', 'BTC', '>', 1, 'then');"
+            )
+            old.commit()
+            old.close()
+            conn, _ = open_store(path)
+            self.assertEqual(conn.execute("SELECT armed FROM alerts").fetchone()[0], 1)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

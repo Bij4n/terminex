@@ -1,8 +1,10 @@
 """Alert evaluation against live snapshots.
 
-Holds in-memory ``last_price`` per (asset_class, symbol) to detect
-threshold *crossings* rather than firing every tick while the
-condition stays true.
+An alert fires when its condition holds and it is armed; firing disarms
+it, and seeing the condition false re-arms it. That makes alerts fire on
+*crossings* rather than every tick while the condition stays true. The
+armed flag lives in the database (see ``alerts.claim_fire``), so it holds
+across restarts and across several terminex windows.
 """
 
 from __future__ import annotations
@@ -24,45 +26,31 @@ class FireEvent:
 class AlertEngine:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
-        self._last_price: dict[tuple[str, str], float] = {}
 
     def evaluate(self, snapshot: Snapshot, asset_class: str) -> list[FireEvent]:
         quote_by_sym = {q.symbol: q.price for q in snapshot.quotes}
-        # Only load alerts for this asset_class
         rows = self.conn.execute(
-            """
-            SELECT * FROM alerts
-            WHERE active = 1 AND asset_class = ?
-            """,
+            "SELECT * FROM alerts WHERE active = 1 AND asset_class = ?",
             (asset_class,),
         ).fetchall()
+
         fires: list[FireEvent] = []
         for row in rows:
             alert = _row_to_alert(row)
             price = quote_by_sym.get(alert.symbol)
             if price is None:
                 continue
-            key = (asset_class, alert.symbol)
-            prev = self._last_price.get(key)
-            triggered = _is_triggered(alert, price, prev)
-            # claim_fire is atomic, so a second terminex on the same
-            # database seeing the same crossing does not fire it again.
-            if triggered and alerts_dao.claim_fire(self.conn, alert, price):
-                fires.append(FireEvent(alert=alert, price=price))
-        # update last-seen prices for every symbol in this snapshot
-        for sym, price in quote_by_sym.items():
-            self._last_price[(asset_class, sym)] = price
+            if condition_met(alert.op, alert.threshold, price):
+                if alert.armed and alerts_dao.claim_fire(self.conn, alert, price):
+                    fires.append(FireEvent(alert=alert, price=price))
+            elif not alert.armed:
+                alerts_dao.rearm(self.conn, alert.id)
         return fires
 
 
-def _is_triggered(alert: Alert, price: float, prev: float | None) -> bool:
-    if alert.op == ">":
-        if price <= alert.threshold:
-            return False
-        # first observation OR prev did not satisfy the condition
-        return prev is None or prev <= alert.threshold
-    if alert.op == "<":
-        if price >= alert.threshold:
-            return False
-        return prev is None or prev >= alert.threshold
+def condition_met(op: str, threshold: float, price: float) -> bool:
+    if op == ">":
+        return price > threshold
+    if op == "<":
+        return price < threshold
     return False

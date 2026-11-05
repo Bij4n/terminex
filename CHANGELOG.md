@@ -13,8 +13,10 @@ independent code review.
   exchange points, and grains and softs in cents. Saved commodity alerts are
   converted from cents to dollars the first time 0.5.0 starts, and terminex
   lists each conversion (for example `SI.F 3205 → 32.05`).
-- **Recurring alerts re-arm after a 5-minute cooldown** instead of on every
-  crossing.
+- **Alerts no longer re-fire when terminex restarts.** Whether an alert has
+  fired is now stored, so a recurring alert fires again only after the
+  price has gone back across the threshold. A new alert whose condition is
+  already true waits for the next crossing.
 - **Piped output prints once and exits.** `terminex | less` or
   `terminex > file` now prints the current tab instead of hanging.
 
@@ -68,7 +70,8 @@ independent code review.
   `watchlist.toml.bak`.
 - Pins from a failed feed said "loading…" forever, and the converter
   answered "unknown symbol" when a feed wasn't loaded.
-- Two terminex windows on the same database both fired the same alert.
+- Two terminex windows on the same database both fired the same alert, and
+  recurring alerts re-fired on every restart while their condition held.
 - Alert fire times were shown as UTC dates.
 - The help overlay was cut off at 80×24.
 - Changes that round to zero were shown as `▼ -0.00%`.

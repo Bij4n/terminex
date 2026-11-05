@@ -872,6 +872,7 @@ class App:
             if threshold <= 0:
                 draft["error"] = "threshold must be positive"
                 return True
+            from .alert_engine import condition_met
             alerts_dao.create(
                 self.store,
                 asset_class=draft["asset_class"],
@@ -879,6 +880,10 @@ class App:
                 op=draft["op"],
                 threshold=threshold,
                 recurring=draft["recurring"],
+                # Already true? Wait for a real crossing rather than firing now.
+                armed=not condition_met(
+                    draft["op"], threshold, draft["current_price"]
+                ),
             )
             self._set_toast(
                 f"alert created: {draft['symbol']} {draft['op']} "

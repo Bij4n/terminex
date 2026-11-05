@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     threshold       REAL NOT NULL,
     recurring       INTEGER NOT NULL DEFAULT 0,
     active          INTEGER NOT NULL DEFAULT 1,
+    armed           INTEGER NOT NULL DEFAULT 1, -- 0 after firing until the price leaves the condition
     created_at      TEXT NOT NULL,
     last_fired_at   TEXT
 );
@@ -91,7 +92,7 @@ _CENT_THRESHOLDS: dict[str, float] = {
     "CT.F": 10.0,    # cotton, $/lb
 }
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _migrate(conn: sqlite3.Connection) -> list[str]:
@@ -118,6 +119,15 @@ def _migrate(conn: sqlite3.Connection) -> list[str]:
                 "commodity prices are now USD per unit; converted alert "
                 "thresholds from cents: " + ", ".join(converted)
             )
+    if version < 2:
+        # Alerts gained an armed flag: firing disarms, leaving the
+        # condition re-arms. Existing alerts start armed.
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(alerts)")}
+        if "armed" not in columns:
+            conn.execute(
+                "ALTER TABLE alerts ADD COLUMN armed INTEGER NOT NULL DEFAULT 1"
+            )
+    if version < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return notices
 
