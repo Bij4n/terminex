@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 from rich.console import Console, Group
@@ -63,6 +66,38 @@ def _format_sort_indicator(key: str, desc: bool) -> str:
         return ""
     arrow = "↓" if desc else "↑"
     return f"sort: {key} {arrow}"
+
+_EXIT_SIGNALS = tuple(
+    sig
+    for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None))
+    if sig is not None
+)
+
+
+@contextmanager
+def _exit_on_signals(signals: tuple[int, ...] = _EXIT_SIGNALS) -> Iterator[None]:
+    """Turn SIGTERM/SIGHUP into ``SystemExit`` while the dashboard runs.
+
+    Without this, ``kill``, ``timeout`` or closing the terminal tab ends
+    the process before ``Live`` and the keyboard listener can restore the
+    cursor and terminal mode.
+    """
+
+    def _handler(signum: int, _frame) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = {}
+    for sig in signals:
+        try:
+            previous[sig] = signal.signal(sig, _handler)
+        except (ValueError, OSError):  # not the main thread
+            pass
+    try:
+        yield
+    finally:
+        for sig, old in previous.items():
+            signal.signal(sig, old)
+
 
 TAB_KEYS = {"1": "fx", "2": "crypto", "3": "commodity", "4": "watchlist"}
 TAB_ORDER = ["fx", "crypto", "commodity", "watchlist"]
@@ -753,6 +788,10 @@ class App:
     # ---- main loop ----
 
     def run(self) -> int:
+        with _exit_on_signals():
+            return self._run()
+
+    def _run(self) -> int:
         # eager first fetch for the active tab
         self._refresh(self.active_tab)
 
