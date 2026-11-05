@@ -1,7 +1,9 @@
 """Crypto provider backed by CoinGecko's public demo API.
 
-No API key required. Rate-limited to roughly 5-15 req/min on the free
-public tier, which is well within a 10-second polling cadence.
+No API key required. The public tier serves prices from a cache that
+refreshes about once a minute and rate-limits at a few requests per
+minute per IP (less on shared VPN exits), so polling faster than the
+cache only fetches the same prices again and invites 429s.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ TIMEOUT = 10.0
 class CryptoCoinGecko(Provider):
     name = "coingecko.com"
     asset_class = "crypto"
+    min_poll_interval: float = 60.0
 
     def __init__(self, limit: int = 25) -> None:
         self.limit = limit
