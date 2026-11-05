@@ -77,6 +77,11 @@ class TestChecks(unittest.TestCase):
         limits = [RateLimitError("429", retry_after=1)] * 3
         self.assertEqual(check(Scripted("feed", *limits)).status, "rate-limited")
 
+    def test_unexpected_exception_is_a_failure_not_a_crash(self):
+        result = check(Scripted("feed", AttributeError("'list' object has no attribute 'get'")))
+        self.assertEqual(result.status, "failing")
+        self.assertIn("AttributeError", result.detail)
+
     def test_simulated_failure(self):
         result = check(Scripted("feed", snap(GOOD)), simulate_failure=True)
         self.assertEqual(result.status, "failing")
@@ -119,6 +124,30 @@ class TestIssues(unittest.TestCase):
         gh = FakeGh(["canary: coingecko.com failing"])
         canary.manage_issues([self.result("ok")], gh=gh)
         self.assertEqual(gh.actions(), [("issue", "close")])
+
+    def test_rate_limited_run_does_not_close_an_open_issue(self):
+        gh = FakeGh(["canary: coingecko.com failing"])
+        canary.manage_issues([self.result("rate-limited")], gh=gh)
+        self.assertEqual(gh.actions(), [])
+
+    def test_one_gh_failure_does_not_stop_the_others(self):
+        import subprocess
+        calls = []
+
+        def flaky_gh(*args):
+            calls.append(args)
+            if args[:2] == ("issue", "list"):
+                return "[]"
+            if args[:2] == ("issue", "create") and "canary: first.com failing" in args:
+                raise subprocess.CalledProcessError(1, ["gh", *args], stderr="HTTP 403: Resource not accessible")
+            return ""
+
+        results = [canary.Result("first.com", "failing", "x"), canary.Result("second.com", "failing", "y")]
+        errors = canary.manage_issues(results, gh=flaky_gh)
+        created = [a for a in calls if a[:2] == ("issue", "create")]
+        self.assertEqual(len(created), 2)                      # second still attempted
+        self.assertEqual(len(errors), 1)
+        self.assertIn("HTTP 403", errors[0])
 
     def test_healthy_or_rate_limited_feeds_open_nothing(self):
         gh = FakeGh()

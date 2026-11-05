@@ -106,6 +106,8 @@ def run_check(
         except ProviderError as exc:  # RateLimitError included
             last_error = exc
             continue
+        except Exception as exc:  # a changed format can surface as any error
+            return Result(name, "failing", f"{type(exc).__name__}: {exc}")
         problems = _problems(check, snapshot)
         if not problems:
             return Result(name, "ok", f"{len(snapshot.quotes)} rows")
@@ -123,25 +125,46 @@ def _gh(*args: str) -> str:
     return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
 
 
-def manage_issues(results: list[Result], gh: Callable[..., str] = _gh) -> None:
-    """One open issue per failing feed; comment while it fails, close on recovery."""
-    gh("label", "create", LABEL, "--color", "B60205",
-       "--description", "Live data feed check", "--force")
-    listed = json.loads(gh("issue", "list", "--label", LABEL, "--state", "open",
-                           "--json", "number,title", "--limit", "100") or "[]")
+def _gh_error(exc: Exception) -> str:
+    stderr = getattr(exc, "stderr", "") or ""
+    return f"{exc}: {stderr.strip()}" if stderr else str(exc)
+
+
+def manage_issues(results: list[Result], gh: Callable[..., str] = _gh) -> list[str]:
+    """One open issue per failing feed; comment while it fails, close on recovery.
+
+    Each feed is handled on its own: a gh failure for one (permissions,
+    Issues disabled) is collected and the rest still go ahead. Returns the
+    gh errors, if any.
+    """
+    errors: list[str] = []
+    try:
+        gh("label", "create", LABEL, "--color", "B60205",
+           "--description", "Live data feed check", "--force")
+        listed = json.loads(gh("issue", "list", "--label", LABEL, "--state", "open",
+                               "--json", "number,title", "--limit", "100") or "[]")
+    except (subprocess.CalledProcessError, OSError, ValueError) as exc:
+        return [f"listing canary issues: {_gh_error(exc)}"]
     open_issues = {issue["title"]: str(issue["number"]) for issue in listed}
     run_url = _run_url()
     for result in results:
         number = open_issues.get(_title(result.name))
-        if result.status == "failing":
-            body = (f"The daily canary could not get good data from **{result.name}**.\n\n"
-                    f"`{result.detail}`\n\n{run_url}")
-            if number:
-                gh("issue", "comment", number, "--body", f"Still failing: `{result.detail}`\n\n{run_url}")
-            else:
-                gh("issue", "create", "--title", _title(result.name), "--label", LABEL, "--body", body)
-        elif result.status == "ok" and number:
-            gh("issue", "close", number, "--comment", f"Recovered: {result.detail}.\n\n{run_url}")
+        try:
+            if result.status == "failing":
+                if number:
+                    gh("issue", "comment", number, "--body",
+                       f"Still failing: `{result.detail}`\n\n{run_url}")
+                else:
+                    body = (f"The daily canary could not get good data from "
+                            f"**{result.name}**.\n\n`{result.detail}`\n\n{run_url}")
+                    gh("issue", "create", "--title", _title(result.name),
+                       "--label", LABEL, "--body", body)
+            elif result.status == "ok" and number:
+                gh("issue", "close", number, "--comment",
+                   f"Recovered: {result.detail}.\n\n{run_url}")
+        except (subprocess.CalledProcessError, OSError) as exc:
+            errors.append(f"{result.name}: {_gh_error(exc)}")
+    return errors
 
 
 def _run_url() -> str:
@@ -176,9 +199,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.summary:
         with open(args.summary, "a", encoding="utf-8") as f:
             f.write("## terminex feed canary\n\n" + report + "\n")
-    if args.manage_issues:
-        manage_issues(results)
-    return 1 if any(r.status == "failing" for r in results) else 0
+    gh_errors = manage_issues(results) if args.manage_issues else []
+    for error in gh_errors:
+        print(f"gh error: {error}", file=sys.stderr)
+    return 1 if gh_errors or any(r.status == "failing" for r in results) else 0
 
 
 if __name__ == "__main__":
