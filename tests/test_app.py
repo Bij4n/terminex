@@ -313,5 +313,18 @@ class TestOnceRouting(unittest.TestCase):
         self.assertFalse(_wants_once(parse_args([]), Out(True)))
 
 
+
+class TestHelpAt80x24(AppTestCase):
+    width, height = 80, 24
+
+    def test_every_key_is_visible(self):
+        self.app.show_help = True
+        lines = self.frame()
+        self.assertLessEqual(len(lines), 24, "\n".join(lines))
+        text = "\n".join(lines)
+        for key in ("← / →", "j k / ↓ ↑", "/", "w", "~", "c", "A", "r", "q"):
+            self.assertIn(key, text)
+
+
 if __name__ == "__main__":
     unittest.main()

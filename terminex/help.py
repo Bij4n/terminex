@@ -12,65 +12,74 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "Navigation",
         [
-            ("1 / 2 / 3 / 4", "switch tab: FX / Crypto / Cmdty / Watch"),
-            ("j / k", "move selected row down / up"),
-            ("g / G", "jump to first / last row"),
+            ("1 – 4", "switch tab"),
+            ("← / →", "previous / next tab"),
+            ("j k / ↓ ↑", "move down / up"),
+            ("g / G", "first / last row"),
         ],
     ),
     (
         "Sort & filter",
         [
-            ("s", "cycle sort: default → 24h → price"),
-            ("S", "toggle sort direction"),
-            ("/", "filter by symbol or name substring"),
-            ("Esc", "clear filter / close help"),
+            ("s", "cycle sort: 24h, price"),
+            ("S", "reverse the sort"),
+            ("/", "filter by symbol or name"),
+            ("Esc", "clear filter / close"),
         ],
     ),
     (
         "Watchlist & view",
         [
-            ("w", "toggle watchlist pin for highlighted row"),
-            ("~", "toggle sparkline column"),
-            ("?", "toggle this help overlay"),
+            ("w", "pin / unpin the row"),
+            ("~", "trend column"),
+            ("?", "this help"),
         ],
     ),
     (
         "Converter & alerts",
         [
-            ("c", "open cross-rate calculator"),
-            ("a", "create alert on highlighted row"),
-            ("A", "list and manage alerts"),
+            ("c", "cross-rate converter"),
+            ("a", "new alert on the row"),
+            ("A", "list / delete alerts"),
         ],
     ),
     (
         "System",
         [
-            ("r", "force refresh the current tab"),
-            ("q / Ctrl-C", "quit"),
+            ("r", "refresh now"),
+            ("q", "quit (also Ctrl-C)"),
         ],
     ),
 ]
 
+# Below this width the sections stack in one column.
+_TWO_COLUMN_WIDTH = 76
 
-def render_help_panel() -> Panel:
-    table = Table(
-        show_header=False, box=None, padding=(0, 2), expand=False
-    )
-    table.add_column("Key", style=theme.HEADER_STYLE, no_wrap=True)
+
+def _section(name: str, bindings: list[tuple[str, str]]) -> Table:
+    table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+    table.add_column("Key", style=theme.HEADER_STYLE, no_wrap=True, min_width=9)
     table.add_column("Action")
+    table.add_row("", Text(name.upper(), style=f"bold {theme.ACCENT}"))
+    for key, action in bindings:
+        table.add_row(key, action)
+    return table
 
-    for idx, (section_name, bindings) in enumerate(SECTIONS):
-        if idx > 0:
-            table.add_row("", "")  # spacer between sections
-        table.add_row(
-            "",
-            Text(section_name.upper(), style=f"bold {theme.ACCENT}"),
-        )
-        for key, action in bindings:
-            table.add_row(key, action)
 
+def render_help_panel(width: int = 120) -> Panel:
+    """Keybindings, in two columns when there's room (fits 80×24)."""
+    sections = [_section(name, bindings) for name, bindings in SECTIONS]
+    columns = 2 if width >= _TWO_COLUMN_WIDTH else 1
+    grid = Table.grid(padding=(0, 3))
+    for _ in range(columns):
+        grid.add_column()
+    for i in range(0, len(sections), columns):
+        if i:
+            grid.add_row(*([""] * columns))  # spacer between section rows
+        row = sections[i:i + columns]
+        grid.add_row(*row, *([""] * (columns - len(row))))
     return Panel(
-        table,
+        grid,
         title="terminex — keybindings",
         title_align="left",
         border_style=theme.PANEL_BORDER_NEUTRAL,

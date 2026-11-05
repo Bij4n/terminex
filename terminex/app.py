@@ -553,7 +553,7 @@ class App:
             body = state_panel("loading…", variant="neutral")
 
         if self.show_help:
-            return Group(header, Text(""), render_help_panel())
+            return Group(header, Text(""), render_help_panel(self.console.width))
 
         if self.input_mode == "converter":
             from .converter import render_converter_panel
