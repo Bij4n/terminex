@@ -85,3 +85,30 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     _prune_prices(conn)
     return conn
+
+
+def connect_memory() -> sqlite3.Connection:
+    """A throwaway in-memory store with the same schema."""
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.executescript(SCHEMA)
+    return conn
+
+
+def open_store(path: Path | None = None) -> tuple[sqlite3.Connection, str | None]:
+    """Open the on-disk store, or fall back to memory if it can't be written.
+
+    Prices don't need the database, so an unwritable data directory should
+    cost persistence, not the whole app. Returns ``(connection, warning)``;
+    ``warning`` is None when the on-disk store opened normally.
+    """
+    p = path or db_path()
+    try:
+        return connect(p), None
+    except (OSError, sqlite3.Error) as exc:
+        reason = getattr(exc, "strerror", None) or str(exc)
+        return connect_memory(), (
+            f"can't write {p.parent} ({reason}); alerts and trend history "
+            "won't be saved this session"
+        )

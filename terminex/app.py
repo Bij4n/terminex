@@ -33,7 +33,7 @@ from .alert_engine import AlertEngine, FireEvent
 from .providers.watchlist_agg import WatchlistAggregator
 from .quote import AssetClass, Quote, Snapshot
 from .series import SeriesStore
-from .store import connect as connect_store
+from .store import open_store
 from .watchlist import Pin, load as load_watchlist, save as save_watchlist
 
 SORT_KEYS = ["default", "24h", "price"]
@@ -184,7 +184,9 @@ class App:
         self.converter_error: str | None = None
         self.alert_draft: dict | None = None  # active alert-creation modal state
         self.alert_list_delete_buffer: str = ""
-        self.store = connect_store()
+        self.store, store_warning = open_store()
+        if store_warning:
+            print(f"terminex: {store_warning}", file=sys.stderr)
         self.alert_engine = AlertEngine(self.store)
         self.series = SeriesStore(db=self.store)
         self.show_sparklines = False
