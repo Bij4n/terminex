@@ -21,7 +21,7 @@ removed without notice, and nothing told anyone that commodities had died.
 
 ## Phase 1: 0.5.0, repair release
 
-Ready to release. See `CHANGELOG.md` for the full list.
+Released 2026-11-04. See `CHANGELOG.md` for the full list.
 
 - Commodities on Yahoo Finance: 14 futures in USD per unit, Brent added.
   Saved alerts from 0.4.0 are migrated from cents to dollars.
