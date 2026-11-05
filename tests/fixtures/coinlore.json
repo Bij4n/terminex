@@ -1,0 +1,106 @@
+{
+ "params": {
+  "limit": 25,
+  "start": 0
+ },
+ "payload": {
+  "data": [
+   {
+    "csupply": "19970852.00",
+    "id": "90",
+    "market_cap_usd": "1610124873825.30",
+    "msupply": "21000000",
+    "name": "Bitcoin",
+    "nameid": "bitcoin",
+    "percent_change_1h": "0.25",
+    "percent_change_24h": "3.36",
+    "percent_change_7d": "-0.46",
+    "price_btc": "1.00",
+    "price_usd": "80623.74",
+    "rank": 1,
+    "symbol": "BTC",
+    "tsupply": "19970852",
+    "volume24": 123522314366.0508,
+    "volume24a": 115488636629.95634
+   },
+   {
+    "csupply": "122374665.72",
+    "id": "80",
+    "market_cap_usd": "297396494555.14",
+    "msupply": "",
+    "name": "Ethereum",
+    "nameid": "ethereum",
+    "percent_change_1h": "0.41",
+    "percent_change_24h": "5.77",
+    "percent_change_7d": "3.24",
+    "price_btc": "0.031729",
+    "price_usd": "2430.21",
+    "rank": 2,
+    "symbol": "ETH",
+    "tsupply": "122374665.71823000",
+    "volume24": 12959039698.202972,
+    "volume24a": 8590573101.146368
+   },
+   {
+    "csupply": "183245941051.28",
+    "id": "518",
+    "market_cap_usd": "183074238756.73",
+    "msupply": "",
+    "name": "Tether",
+    "nameid": "tether",
+    "percent_change_1h": "0.01",
+    "percent_change_24h": "0.02",
+    "percent_change_7d": "-0.43",
+    "price_btc": "0.000013",
+    "price_usd": "0.999063",
+    "rank": 3,
+    "symbol": "USDT",
+    "tsupply": "188712883627.4062",
+    "volume24": 55336954550.64776,
+    "volume24a": 45331968060.334656
+   },
+   {
+    "csupply": "139186427.32",
+    "id": "2710",
+    "market_cap_usd": "99423619964.79",
+    "msupply": "200000000",
+    "name": "Binance Coin",
+    "nameid": "binance-coin",
+    "percent_change_1h": "0.16",
+    "percent_change_24h": "1.89",
+    "percent_change_7d": "-4.81",
+    "price_btc": "0.009326",
+    "price_usd": "714.32",
+    "rank": 4,
+    "symbol": "BNB",
+    "tsupply": "139186427.32",
+    "volume24": 734326362.1647781,
+    "volume24a": 585841515.6306424
+   },
+   {
+    "csupply": "59777241479.00",
+    "id": "58",
+    "market_cap_usd": "78360204202.30",
+    "msupply": "100000000000",
+    "name": "XRP",
+    "nameid": "ripple",
+    "percent_change_1h": "0.34",
+    "percent_change_24h": "2.80",
+    "percent_change_7d": "-1.14",
+    "price_btc": "0.000017",
+    "price_usd": "1.31",
+    "rank": 5,
+    "symbol": "XRP",
+    "tsupply": "99986586496",
+    "volume24": 1942127831.3954198,
+    "volume24a": 1569550143.9440074
+   }
+  ],
+  "info": {
+   "coins_num": 14993,
+   "time": 1793862124
+  }
+ },
+ "recorded_at": "2026-11-05T07:03:37+00:00",
+ "url": "https://api.coinlore.net/api/tickers/"
+}

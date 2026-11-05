@@ -51,15 +51,21 @@ class Result:
 
 
 def default_checks() -> list[Check]:
-    from terminex.providers.commodities_yahoo import CommoditiesYahoo
+    from terminex.providers.commodities_yahoo import HOSTS, CommoditiesYahoo
     from terminex.providers.crypto_coincap import CryptoCoinCap
     from terminex.providers.crypto_coingecko import CryptoCoinGecko
+    from terminex.providers.crypto_coinlore import CryptoCoinLore
     from terminex.providers.fx_erapi import FxERApi
 
+    # Every feed separately, fallbacks included: a fallback that has quietly
+    # died is no fallback.
+    futures = {"GC.F", "CL.F", "ZW.F"}
     checks = [
         Check(FxERApi(), min_rows=25, required={"USD", "EUR", "JPY", "GBP"}),
         Check(CryptoCoinGecko(), min_rows=20, required={"BTC", "ETH"}, history=True),
-        Check(CommoditiesYahoo(), min_rows=12, required={"GC.F", "CL.F", "ZW.F"}, history=True),
+        Check(CryptoCoinLore(), min_rows=20, required={"BTC", "ETH"}),
+        *(Check(CommoditiesYahoo(host=h), min_rows=12, required=futures, history=True)
+          for h in HOSTS),
     ]
     key = os.environ.get("TERMINEX_COINCAP_KEY")
     if key:

@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 from terminex.providers.commodities_yahoo import CommoditiesYahoo  # noqa: E402
 from terminex.providers.crypto_coincap import CryptoCoinCap  # noqa: E402
 from terminex.providers.crypto_coingecko import CryptoCoinGecko  # noqa: E402
+from terminex.providers.crypto_coinlore import CryptoCoinLore  # noqa: E402
 from terminex.providers.fx_erapi import FxERApi  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -40,6 +41,10 @@ def _trim_coingecko(payload):
 
 
 def _trim_coincap(payload):
+    return {**payload, "data": payload.get("data", [])[:KEEP_ROWS]}
+
+
+def _trim_coinlore(payload):
     return {**payload, "data": payload.get("data", [])[:KEEP_ROWS]}
 
 
@@ -79,6 +84,7 @@ def main() -> int:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     record("erapi", FxERApi(), _trim_erapi)
     record("coingecko", CryptoCoinGecko(), _trim_coingecko)
+    record("coinlore", CryptoCoinLore(), _trim_coinlore)
     record("yahoo_spark", CommoditiesYahoo(), _trim_yahoo)
     key = os.environ.get("TERMINEX_COINCAP_KEY")
     if key:

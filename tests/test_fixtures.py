@@ -18,6 +18,7 @@ from unittest import mock
 from terminex.providers.base import ProviderError
 from terminex.providers.commodities_yahoo import CommoditiesYahoo
 from terminex.providers.crypto_coingecko import CryptoCoinGecko
+from terminex.providers.crypto_coinlore import CryptoCoinLore
 from terminex.providers.fx_erapi import FxERApi
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -79,6 +80,18 @@ class TestCoinGeckoFixture(unittest.TestCase):
             coin["price"] = coin.pop("current_price")
         with self.assertRaises(ProviderError):
             fetch_with("crypto_coingecko", CryptoCoinGecko(), payload)
+
+
+class TestCoinLoreFixture(unittest.TestCase):
+    def test_parses_prices_rank_and_changes(self):
+        snap = fetch_with("crypto_coinlore", CryptoCoinLore(), load("coinlore")["payload"])
+        self.assertEqual(len(snap.quotes), 5)
+        self.assertEqual(snap.quotes[0].symbol, "BTC")
+        assert_sane_prices(self, snap)
+        for q in snap.quotes:
+            self.assertIsNotNone(q.change_24h_pct)
+            self.assertIn("rank", q.meta)
+            self.assertIn("change_7d_pct", q.meta)
 
 
 class TestYahooFixture(unittest.TestCase):
