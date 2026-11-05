@@ -35,7 +35,16 @@ class FxERApi(Provider):
             raise ProviderError(f"invalid json: {exc}") from exc
 
         if payload.get("result") != "success":
-            raise ProviderError(f"api returned: {payload.get('result')!r}")
+            error_type = payload.get("error-type")
+            if error_type == "unsupported-code":
+                raise ProviderError(
+                    f"{self.name} does not support base currency "
+                    f"{self.base!r}; try a code like USD, EUR or JPY"
+                )
+            raise ProviderError(
+                f"{self.name} returned an error: "
+                f"{error_type or payload.get('result')!r}"
+            )
 
         rates = payload.get("rates")
         if not isinstance(rates, dict):

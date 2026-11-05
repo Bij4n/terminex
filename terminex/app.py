@@ -14,7 +14,12 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.text import Text
 
-from .config import Config, load as load_config
+from .config import (
+    Config,
+    load as load_config,
+    parse_currency_code,
+    parse_interval,
+)
 from .display import build_table, state_panel
 from .help import render_filter_bar, render_help_panel
 from .keyboard import KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, KeyboardListener
@@ -836,6 +841,18 @@ class App:
         return 0
 
 
+def _cli_type(parse):
+    """Adapt a config value parser into an argparse ``type=``."""
+
+    def convert(text: str):
+        try:
+            return parse(text)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from None
+
+    return convert
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     try:
         from importlib.metadata import version as _pkg_version
@@ -852,15 +869,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {_version}"
     )
-    parser.add_argument("--base", default=None, help="FX base currency")
     parser.add_argument(
-        "--interval", type=float, default=None, help="refresh interval (s)"
+        "--base",
+        type=_cli_type(parse_currency_code),
+        default=None,
+        help="FX base currency, e.g. EUR",
+    )
+    parser.add_argument(
+        "--interval",
+        type=_cli_type(parse_interval),
+        default=None,
+        help="refresh interval in seconds",
     )
     parser.add_argument(
         "--tab",
         choices=TAB_ORDER,
         default=None,
-        help="tab to launch on (fx/crypto/commodity)",
+        help="tab to launch on",
     )
     return parser.parse_args(argv)
 
@@ -869,7 +894,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     config = load_config()
     if args.base:
-        config = replace(config, base_currency=args.base.upper())
+        config = replace(config, base_currency=args.base)
     if args.tab:
         config = replace(config, active_tab=args.tab)
     interval = args.interval if args.interval is not None else config.refresh_interval
