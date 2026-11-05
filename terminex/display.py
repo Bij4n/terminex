@@ -78,10 +78,14 @@ def _format_price(value: float) -> str:
     return f"{value:.5f}"
 
 
+# Changes that would print as "+0.00%" / "-0.00%" are shown as no change.
+_ZERO_PCT = 0.005
+
+
 def _format_pct(value: float | None) -> Text:
     if value is None:
         return Text("·", style=theme.NEUTRAL)
-    if abs(value) < 1e-4:
+    if abs(value) < _ZERO_PCT:
         return Text("·", style=theme.NEUTRAL)
     arrow = "▲" if value > 0 else "▼"
     return Text(f"{arrow} {value:+.2f}%", style=theme.pct_style(value))
@@ -92,7 +96,7 @@ def _delta_cell(current: float, previous: float | None) -> Text:
         return Text("·", style=theme.NEUTRAL)
     diff = current - previous
     pct = (diff / previous) * 100.0
-    if abs(pct) < 1e-4:
+    if abs(pct) < _ZERO_PCT:
         return Text("·", style=theme.NEUTRAL)
     arrow = "▲" if diff > 0 else "▼"
     return Text(f"{arrow} {pct:+.2f}%", style=theme.pct_style(diff))

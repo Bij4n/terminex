@@ -91,5 +91,14 @@ class TestFitTable(unittest.TestCase):
         self.assertEqual(len(lines), 5)
 
 
+class TestZeroChanges(unittest.TestCase):
+    def test_pct_that_rounds_to_zero_shows_no_change(self):
+        from terminex.display import _delta_cell, _format_pct
+
+        self.assertEqual(_format_pct(-0.004).plain, "·")
+        self.assertEqual(_delta_cell(100.0, 100.004).plain, "·")
+        self.assertEqual(_format_pct(0.01).plain, "▲ +0.01%")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -71,6 +71,8 @@ def render(
 
 def _format_change(pct: float) -> str:
     """Signed percentage that fits the label width (fewer decimals as it grows)."""
+    if abs(pct) < 0.005:
+        return "0.00%"
     if abs(pct) < 100:
         return f"{pct:+.2f}%"
     if abs(pct) < 1000:

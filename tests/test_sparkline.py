@@ -37,6 +37,9 @@ class TestRender(unittest.TestCase):
     def test_label_uses_given_change(self):
         self.assertTrue(render([1.0, 2.0], change_pct=4.99).plain.endswith("+4.99%"))
 
+    def test_change_that_rounds_to_zero_has_no_sign(self):
+        self.assertTrue(render([1.0, 1.0], change_pct=-0.001).plain.endswith(" 0.00%"))
+
     def test_label_falls_back_to_first_last(self):
         self.assertTrue(render([100.0, 101.0]).plain.endswith("+1.00%"))
 
