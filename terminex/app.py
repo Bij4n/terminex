@@ -29,6 +29,7 @@ from .providers.base import Provider, ProviderError, RateLimitError
 from .providers.commodities_yahoo import CommoditiesYahoo
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.crypto_coingecko import CryptoCoinGecko
+from .providers.fallback import FallbackProvider
 from .providers.fx_erapi import FxERApi
 from .alert_engine import AlertEngine, FireEvent
 from .providers.watchlist_agg import WatchlistAggregator
@@ -156,10 +157,11 @@ class TabState:
 
 def default_providers(config: Config) -> dict[str, Provider]:
     """The data source for each source tab, chosen from the config."""
-    # CoinCap v3 requires a key; without one the keyless CoinGecko public
-    # API keeps the crypto tab working out of the box.
+    # CoinCap v3 requires a key. With one, CoinCap leads and the keyless
+    # CoinGecko public API takes over while CoinCap is down; without one,
+    # CoinGecko alone keeps the crypto tab working out of the box.
     crypto: Provider = (
-        CryptoCoinCap(api_key=config.coincap_api_key)
+        FallbackProvider(CryptoCoinCap(api_key=config.coincap_api_key), CryptoCoinGecko())
         if config.coincap_api_key
         else CryptoCoinGecko()
     )
