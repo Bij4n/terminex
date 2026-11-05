@@ -297,6 +297,30 @@ class TestRunOnce(AppTestCase):
             self.assertEqual(conn.execute("SELECT count(*) FROM fires").fetchone()[0], 0)
 
 
+class TestRunOnceEmptyWatchlist(AppTestCase):
+    def test_no_network_when_nothing_is_pinned(self):
+        import contextlib
+        self.app.active_tab = "watchlist"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.app.run_once(), 1)
+        self.assertIn("no symbols pinned", err.getvalue())
+        calls = sum(self.app.tabs[t].provider.calls for t in ("fx", "crypto", "commodity"))
+        self.assertEqual(calls, 0)
+
+
+class TestOverlaysSkipTheTable(AppTestCase):
+    def test_help_and_modals_do_not_build_tables(self):
+        self.app._refresh("crypto")
+        with mock.patch("terminex.app.build_table") as build:
+            self.app.show_help = True
+            self.app._render()
+            self.app.show_help = False
+            self.app.input_mode = "converter"
+            self.app._render()
+        build.assert_not_called()
+
+
 class TestOnceRouting(unittest.TestCase):
     def test_once_flag_or_non_terminal_output(self):
         from terminex.app import _wants_once, parse_args

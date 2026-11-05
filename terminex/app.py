@@ -494,6 +494,42 @@ class App:
     def _render(self):
         state = self.tabs[self.active_tab]
         header = self._header()
+        # Overlays and modals replace the table: return before building it.
+        if self.show_help:
+            return Group(header, Text(""), render_help_panel(self.console.width))
+
+        if self.input_mode == "converter":
+            from .converter import render_converter_panel
+            return Group(
+                header,
+                Text(""),
+                render_converter_panel(
+                    self.converter_buffer,
+                    self.converter_history,
+                    self.converter_error,
+                ),
+            )
+
+        if self.input_mode == "alert_new" and self.alert_draft is not None:
+            from .alerts_ui import render_alert_new_panel
+            return Group(
+                header,
+                Text(""),
+                render_alert_new_panel(self.alert_draft),
+            )
+
+        if self.input_mode == "alert_list":
+            from . import alerts as alerts_dao
+            from .alerts_ui import render_alert_list_panel
+            return Group(
+                header,
+                Text(""),
+                render_alert_list_panel(
+                    alerts_dao.list_all(self.store),
+                    delete_buffer=self.alert_list_delete_buffer,
+                ),
+            )
+
         status_line = self._build_status_line(state)
         # Header and status line wrap on narrow terminals: measure them.
         chrome_lines = (
@@ -570,41 +606,6 @@ class App:
             )
         else:
             body = state_panel("loading…", variant="neutral")
-
-        if self.show_help:
-            return Group(header, Text(""), render_help_panel(self.console.width))
-
-        if self.input_mode == "converter":
-            from .converter import render_converter_panel
-            return Group(
-                header,
-                Text(""),
-                render_converter_panel(
-                    self.converter_buffer,
-                    self.converter_history,
-                    self.converter_error,
-                ),
-            )
-
-        if self.input_mode == "alert_new" and self.alert_draft is not None:
-            from .alerts_ui import render_alert_new_panel
-            return Group(
-                header,
-                Text(""),
-                render_alert_new_panel(self.alert_draft),
-            )
-
-        if self.input_mode == "alert_list":
-            from . import alerts as alerts_dao
-            from .alerts_ui import render_alert_list_panel
-            return Group(
-                header,
-                Text(""),
-                render_alert_list_panel(
-                    alerts_dao.list_all(self.store),
-                    delete_buffer=self.alert_list_delete_buffer,
-                ),
-            )
 
         return Group(header, Text(""), body, Text(""), status_line)
 
@@ -1011,11 +1012,11 @@ class App:
         self.evaluate_alerts = False
         try:
             tab = self.active_tab
-            self._refresh(tab)
-            state = self.tabs[tab]
             if tab == "watchlist" and not self.watchlist.pins:
                 print("terminex: no symbols pinned", file=sys.stderr)
-                return 1
+                return 1  # before any request: cron jobs shouldn't burn quota
+            self._refresh(tab)
+            state = self.tabs[tab]
             if state.last_snapshot is None:
                 print(f"terminex: {state.last_error or 'no data'}", file=sys.stderr)
                 return 1
