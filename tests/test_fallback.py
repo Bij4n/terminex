@@ -86,16 +86,18 @@ class TestFallbackProvider(unittest.TestCase):
         self.assertIn("coincap.io returned HTTP 401", str(ctx.exception))
         self.assertIn("can't reach coingecko.com", str(ctx.exception))
 
-    def test_rate_limited_last_feed_rests_while_the_first_is_retried(self):
-        self.primary.error = ProviderError("down")
-        self.secondary.error = RateLimitError("coingecko 429", retry_after=60)
-        with self.assertRaises(ProviderError) as ctx:
+    def test_a_rate_limit_proves_the_connection_so_the_down_feed_rests(self):
+        self.primary.error = ProviderError("coincap.io returned HTTP 503")
+        self.secondary.error = RateLimitError("coingecko 429", retry_after=1800)
+        with self.assertRaises(RateLimitError) as ctx:
             self.feed.fetch()
-        self.assertNotIsInstance(ctx.exception, RateLimitError)   # the app retries soon
-        self.now += 30
-        with self.assertRaises(ProviderError):
+        # The 429 was a real answer, so the 503 is the feed's own: it rests
+        # 300 s, and the chain waits for that, not the 1800 s window.
+        self.assertEqual(ctx.exception.retry_after, 300)
+        self.now += 60
+        with self.assertRaises(RateLimitError):
             self.feed.fetch()
-        self.assertEqual((self.primary.calls, self.secondary.calls), (2, 1))  # 429 respected
+        self.assertEqual((self.primary.calls, self.secondary.calls), (1, 1))  # nothing hammered
 
     def test_only_rate_limits_left_reports_a_rate_limit(self):
         self.primary.error = RateLimitError("coincap 429", retry_after=120)
@@ -162,13 +164,13 @@ class TestLongerChains(unittest.TestCase):
             self.feed.fetch()
         self.assertEqual(ctx.exception.retry_after, 50)
 
-    def test_mixed_failures_are_a_plain_error(self):
+    def test_mixed_failures_wait_for_the_earliest_feed(self):
         self.a.error = ProviderError("401")
         self.b.error = ProviderError("503")
         self.c.error = RateLimitError("c 429", retry_after=1800)
-        with self.assertRaises(ProviderError) as ctx:
+        with self.assertRaises(RateLimitError) as ctx:
             self.feed.fetch()
-        self.assertNotIsInstance(ctx.exception, RateLimitError)   # app retries in 30 s
+        self.assertEqual(ctx.exception.retry_after, 300)      # not frozen for 1800 s
 
     def test_unexpected_exception_falls_back_and_rests_the_feed(self):
         self.a.error = KeyError("price")             # a provider bug, not a ProviderError

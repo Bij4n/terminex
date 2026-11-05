@@ -3,10 +3,11 @@
 Crypto uses CoinGecko → CoinLore (CoinCap first when a key is set);
 commodities use Yahoo's query1 host → query2. Any rate-limited feed,
 the last included, rests for its Retry-After. A feed that fails otherwise
-rests ``FEED_RETRY`` seconds, but only when a later feed answered in the
-same pass, so the last feed never rests for that: and if every feed fails
-at once the problem is most likely our own connection, so nothing rests
-and the first feed is tried again on the app's next retry.
+rests ``FEED_RETRY`` seconds, but only when some other feed gave a real
+answer in the same pass (data, or a 429): if no feed answers at all the
+problem is most likely our own connection, so nothing rests and the first
+feed is tried again on the app's next retry. When every feed fails, the
+chain reports a rate limit lasting until the first feed is free again.
 ``name`` and ``min_poll_interval`` follow whichever feed is serving, and
 the snapshot's provider name lists the feeds that were skipped.
 """
@@ -43,6 +44,7 @@ class FallbackProvider(Provider):
         now = time.monotonic()
         errors: list[ProviderError] = []
         plain_failures: list[int] = []
+        connected = False  # did any feed give a real answer (data or a 429)?
         for i, provider in enumerate(self.providers):
             if now < self._rest_until[i]:
                 continue
@@ -51,6 +53,7 @@ class FallbackProvider(Provider):
             except RateLimitError as exc:
                 errors.append(exc)
                 self._rest_until[i] = now + exc.retry_after
+                connected = True
                 continue
             except ProviderError as exc:
                 errors.append(exc)
@@ -63,30 +66,27 @@ class FallbackProvider(Provider):
                 ))
                 plain_failures.append(i)
                 continue
-            # A later feed answered, so the network is fine and the earlier
-            # failures are the feeds' own: rest them.
-            for j in plain_failures:
-                self._rest_until[j] = now + FEED_RETRY
+            self._rest(plain_failures, now)
             self._active = provider
             if i == 0:
                 return snapshot
             skipped = ", ".join(p.name for p in self.providers[:i])
             return replace(snapshot, provider_name=f"{provider.name} ({skipped} unavailable)")
 
-        if not errors:
-            # Every feed is resting (rate limits): wait for the first.
-            retry_after = max(1.0, min(self._rest_until) - now)
-            raise RateLimitError(
-                "every feed is rate limited — waiting for the first to free up",
-                retry_after=retry_after,
-            )
-        message = "; ".join(str(e) for e in errors)
-        if plain_failures:
-            # Every feed failed in the same pass: most likely our own
-            # connection. Rest nothing, so the first feed is tried again
-            # as soon as the app retries.
+        message = "; ".join(str(e) for e in errors) or (
+            "every feed is rate limited — waiting for the first to free up"
+        )
+        if plain_failures and not connected:
+            # No feed answered at all: most likely our own connection.
+            # Rest nothing, so the first feed is tried on the app's next retry.
             raise ProviderError(message) from errors[-1]
-        # Every feed is rate limited or resting: wait for the first one to
-        # become available again, not for the last one's window.
+        # Some feed answered (a 429 is an answer), so the ordinary failures
+        # are the feeds' own: rest them, and wait for the first feed to free
+        # up rather than for the longest rate-limit window.
+        self._rest(plain_failures, now)
         retry_after = max(1.0, min(t - now for t in self._rest_until if t > now))
-        raise RateLimitError(message, retry_after=retry_after) from errors[-1]
+        raise RateLimitError(message, retry_after=retry_after)
+
+    def _rest(self, indices: list[int], now: float) -> None:
+        for i in indices:
+            self._rest_until[i] = now + FEED_RETRY

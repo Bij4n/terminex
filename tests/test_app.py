@@ -414,8 +414,10 @@ class TestFallbackChainInTheApp(AppTestCase):
         self.gecko.error = ProviderError("coingecko.com returned HTTP 503")
         self.lore.error = RateLimitError("coinlore.com rate limited", retry_after=1800)
         self.app._refresh("crypto")
-        self.clock.now += 30
-        self.assertTrue(self.app._needs_refresh("crypto"))   # not frozen for 1800 s
+        self.clock.now += 299
+        self.assertFalse(self.app._needs_refresh("crypto"))  # CoinGecko rests 5 min…
+        self.clock.now += 1
+        self.assertTrue(self.app._needs_refresh("crypto"))   # …not the 30 min window
 
     def test_backoff_toast_does_not_blame_the_wrong_feed(self):
         self.gecko.error = RateLimitError("coingecko.com rate limited", retry_after=100)
