@@ -26,9 +26,10 @@ from .help import render_filter_bar, render_help_panel
 from .keyboard import KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, KeyboardListener
 from .statusbar import render_status_bar
 from .providers.base import Provider, ProviderError, RateLimitError
-from .providers.commodities_yahoo import CommoditiesYahoo
+from .providers.commodities_yahoo import HOSTS as YAHOO_HOSTS, CommoditiesYahoo
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.crypto_coingecko import CryptoCoinGecko
+from .providers.crypto_coinlore import CryptoCoinLore
 from .providers.fallback import FallbackProvider
 from .providers.fx_erapi import FxERApi
 from .alert_engine import AlertEngine, FireEvent
@@ -157,18 +158,17 @@ class TabState:
 
 def default_providers(config: Config) -> dict[str, Provider]:
     """The data source for each source tab, chosen from the config."""
-    # CoinCap v3 requires a key. With one, CoinCap leads and the keyless
-    # CoinGecko public API takes over while CoinCap is down; without one,
-    # CoinGecko alone keeps the crypto tab working out of the box.
-    crypto: Provider = (
-        FallbackProvider(CryptoCoinCap(api_key=config.coincap_api_key), CryptoCoinGecko())
-        if config.coincap_api_key
-        else CryptoCoinGecko()
-    )
+    # Crypto: the keyless CoinGecko public API, with keyless CoinLore behind
+    # it. CoinCap needs a key; with one it leads the chain.
+    crypto_chain: list[Provider] = [CryptoCoinGecko(), CryptoCoinLore()]
+    if config.coincap_api_key:
+        crypto_chain.insert(0, CryptoCoinCap(api_key=config.coincap_api_key))
+    # Commodities: Yahoo serves the same API from two hosts.
+    commodities = FallbackProvider(*(CommoditiesYahoo(host=h) for h in YAHOO_HOSTS))
     return {
         "fx": FxERApi(base=config.base_currency),
-        "crypto": crypto,
-        "commodity": CommoditiesYahoo(),
+        "crypto": FallbackProvider(*crypto_chain),
+        "commodity": commodities,
     }
 
 

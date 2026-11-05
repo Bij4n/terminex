@@ -94,13 +94,54 @@ class TestFallbackProvider(unittest.TestCase):
         self.assertEqual(ctx.exception.retry_after, 60)
 
 
-class TestDefaultCryptoChain(unittest.TestCase):
-    def test_coincap_key_gets_coingecko_as_fallback(self):
+class TestLongerChains(unittest.TestCase):
+    def setUp(self):
+        self.now = 1000.0
+        patcher = mock.patch("terminex.providers.fallback.time.monotonic", lambda: self.now)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.a, self.b, self.c = Feed("coincap.io"), Feed("coingecko.com", 60.0), Feed("coinlore.com", 60.0)
+        self.feed = FallbackProvider(self.a, self.b, self.c)
+
+    def test_caption_lists_every_skipped_feed(self):
+        self.a.error = ProviderError("401")
+        self.b.error = RateLimitError("429", retry_after=60)
+        snap = self.feed.fetch()
+        self.assertEqual(snap.provider_name, "coinlore.com (coincap.io, coingecko.com unavailable)")
+
+    def test_last_feed_is_never_rested(self):
+        for feed in (self.a, self.b, self.c):
+            feed.error = ProviderError("down")
+        with self.assertRaises(ProviderError):
+            self.feed.fetch()
+        self.c.error = None
+        self.now += 30                      # the app's 30 s error retry
+        self.assertEqual(self.feed.fetch().provider_name,
+                         "coinlore.com (coincap.io, coingecko.com unavailable)")
+        self.assertEqual((self.a.calls, self.b.calls, self.c.calls), (1, 1, 2))
+
+    def test_needs_two_feeds(self):
+        with self.assertRaises(ValueError):
+            FallbackProvider(self.a)
+
+
+class TestDefaultChains(unittest.TestCase):
+    def names(self, provider):
+        return [p.name for p in provider.providers]
+
+    def test_crypto_chains(self):
         from terminex.app import default_providers
         from terminex.config import Config
-        crypto = default_providers(Config(coincap_api_key="k"))["crypto"]
-        self.assertIsInstance(crypto, FallbackProvider)
-        self.assertEqual((crypto.primary.name, crypto.secondary.name), ("coincap.io", "coingecko.com"))
+        self.assertEqual(self.names(default_providers(Config())["crypto"]),
+                         ["coingecko.com", "coinlore.com"])
+        self.assertEqual(self.names(default_providers(Config(coincap_api_key="k"))["crypto"]),
+                         ["coincap.io", "coingecko.com", "coinlore.com"])
+
+    def test_commodities_chain(self):
+        from terminex.app import default_providers
+        from terminex.config import Config
+        self.assertEqual(self.names(default_providers(Config())["commodity"]),
+                         ["query1.finance.yahoo.com", "query2.finance.yahoo.com"])
 
 
 if __name__ == "__main__":

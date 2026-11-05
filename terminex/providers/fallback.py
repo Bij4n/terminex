@@ -1,11 +1,12 @@
-"""A provider that falls back to a second feed while the first is down.
+"""A provider that serves from the first healthy feed in an ordered chain.
 
-Used for crypto when a CoinCap key is set: CoinCap first, CoinGecko when
-CoinCap fails. While the primary is down it is only retried after its
-rate-limit window (Retry-After) or ``PRIMARY_RETRY`` seconds, so a dead
-or misconfigured feed isn't hit on every poll. ``name`` and
-``min_poll_interval`` follow whichever feed is serving, and the snapshot's
-provider name says when the fallback is in use.
+Crypto uses CoinGecko → CoinLore (CoinCap first when a key is set);
+commodities use Yahoo's query1 host → query2. A feed that fails rests
+until its rate-limit window (Retry-After) or ``FEED_RETRY`` seconds pass,
+so a dead or misconfigured feed isn't hit on every poll. The last feed
+never rests: the app's own retry schedule decides when it is asked again.
+``name`` and ``min_poll_interval`` follow whichever feed is serving, and
+the snapshot's provider name lists the feeds that were skipped.
 """
 
 from __future__ import annotations
@@ -16,16 +17,17 @@ from dataclasses import replace
 from ..quote import Snapshot
 from .base import Provider, ProviderError, RateLimitError
 
-PRIMARY_RETRY = 300.0  # seconds before retrying a primary that failed
+FEED_RETRY = 300.0  # seconds a failed (non-final) feed rests before a retry
 
 
 class FallbackProvider(Provider):
-    def __init__(self, primary: Provider, secondary: Provider) -> None:
-        self.primary = primary
-        self.secondary = secondary
-        self.asset_class = primary.asset_class
-        self._active = primary
-        self._primary_retry_at = 0.0  # monotonic
+    def __init__(self, *providers: Provider) -> None:
+        if len(providers) < 2:
+            raise ValueError("a fallback chain needs at least two feeds")
+        self.providers = list(providers)
+        self.asset_class = providers[0].asset_class
+        self._active = providers[0]
+        self._rest_until = [0.0] * len(providers)  # monotonic, per feed
 
     @property  # type: ignore[override]
     def name(self) -> str:
@@ -36,32 +38,30 @@ class FallbackProvider(Provider):
         return self._active.min_poll_interval
 
     def fetch(self) -> Snapshot:
-        primary_error: ProviderError | None = None
         now = time.monotonic()
-        if now >= self._primary_retry_at:
+        last = len(self.providers) - 1
+        errors: list[ProviderError] = []
+        for i, provider in enumerate(self.providers):
+            if i < last and now < self._rest_until[i]:
+                continue
             try:
-                snapshot = self.primary.fetch()
+                snapshot = provider.fetch()
             except RateLimitError as exc:
-                primary_error = exc
-                self._primary_retry_at = now + exc.retry_after
+                errors.append(exc)
+                self._rest_until[i] = now + exc.retry_after
+                continue
             except ProviderError as exc:
-                primary_error = exc
-                self._primary_retry_at = now + PRIMARY_RETRY
-            else:
-                self._active = self.primary
+                errors.append(exc)
+                self._rest_until[i] = now + FEED_RETRY
+                continue
+            self._active = provider
+            if i == 0:
                 return snapshot
+            skipped = ", ".join(p.name for p in self.providers[:i])
+            return replace(snapshot, provider_name=f"{provider.name} ({skipped} unavailable)")
 
-        try:
-            snapshot = self.secondary.fetch()
-        except ProviderError as exc:
-            if primary_error is None:
-                raise
-            message = f"{primary_error}; fallback: {exc}"
-            if isinstance(exc, RateLimitError):
-                raise RateLimitError(message, retry_after=exc.retry_after) from exc
-            raise ProviderError(message) from exc
-        self._active = self.secondary
-        return replace(
-            snapshot,
-            provider_name=f"{self.secondary.name} ({self.primary.name} unavailable)",
-        )
+        message = "; ".join(str(e) for e in errors)
+        final = errors[-1]
+        if isinstance(final, RateLimitError):
+            raise RateLimitError(message, retry_after=final.retry_after) from final
+        raise ProviderError(message) from final

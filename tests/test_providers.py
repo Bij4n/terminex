@@ -181,6 +181,43 @@ class TestEmptyResultsAreErrors(unittest.TestCase):
                         provider.fetch()
 
 
+class TestCoinLore(unittest.TestCase):
+    def _fetch(self, payload, status=200, headers=None):
+        from terminex.providers.crypto_coinlore import CryptoCoinLore
+        with mock.patch("terminex.providers.crypto_coinlore.requests.get",
+                        return_value=_response(status, payload, headers)) as get:
+            return CryptoCoinLore().fetch(), get
+
+    def test_parses_string_numbers_rank_and_changes(self):
+        snap, get = self._fetch({"data": [
+            {"symbol": "BTC", "name": "Bitcoin", "rank": 1, "price_usd": "80528.59",
+             "percent_change_24h": "3.36", "percent_change_7d": "-0.62"},
+            {"symbol": "ETH", "name": "Ethereum", "rank": 2, "price_usd": "nan"},
+            "junk",
+        ]})
+        self.assertEqual([q.symbol for q in snap.quotes], ["BTC"])
+        btc = snap.quotes[0]
+        self.assertEqual((btc.price, btc.change_24h_pct), (80528.59, 3.36))
+        self.assertEqual(btc.meta, {"rank": 1, "change_7d_pct": -0.62})
+        self.assertIn("terminex", get.call_args.kwargs["headers"]["User-Agent"])
+
+    def test_rate_limit_and_empty(self):
+        with self.assertRaises(RateLimitError):
+            self._fetch(None, status=429, headers={"Retry-After": "10"})
+        with self.assertRaises(ProviderError):
+            self._fetch({"data": []})
+
+
+class TestYahooHosts(unittest.TestCase):
+    def test_host_sets_url_and_name(self):
+        provider = CommoditiesYahoo(host="query2.finance.yahoo.com")
+        self.assertEqual(provider.name, "query2.finance.yahoo.com")
+        with mock.patch("terminex.providers.commodities_yahoo.requests.get",
+                        return_value=_response(200, SPARK)) as get:
+            provider.fetch()
+        self.assertTrue(get.call_args.args[0].startswith("https://query2.finance.yahoo.com/"))
+
+
 class TestCoinGeckoPayloads(unittest.TestCase):
     def test_non_finite_values_are_dropped(self):
         resp = _response(200, [

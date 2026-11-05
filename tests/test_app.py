@@ -474,7 +474,7 @@ class TestInjection(unittest.TestCase):
     def test_default_providers_follow_the_config(self):
         from terminex.app import default_providers
         self.assertEqual(default_providers(Config())["crypto"].name, "coingecko.com")
-        self.assertEqual(default_providers(Config(coincap_api_key="k"))["crypto"].primary.name, "coincap.io")
+        self.assertEqual(default_providers(Config(coincap_api_key="k"))["crypto"].name, "coincap.io")
         self.assertEqual(default_providers(Config(base_currency="EUR"))["fx"].base, "EUR")
 
     def test_app_uses_what_it_is_given(self):
