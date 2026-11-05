@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from rich.console import Console
 
-from terminex.display import build_table, fit_table, scroll_offset
+from terminex.display import build_table, fit_hidden, scroll_offset
 from terminex.quote import Quote, Snapshot
 
 
@@ -65,11 +65,11 @@ class TestFitTable(unittest.TestCase):
     def _fit(self, width: int, trend: bool = True) -> str:
         snap = _snap(5)
         getter = (lambda a, s: []) if trend else None
-        table = fit_table(
-            lambda hidden: build_table(snap, series_getter=getter, hidden=hidden),
-            Console(width=width, file=io.StringIO()),
-        )
-        return _text(table, width)
+        def build(hidden):
+            return build_table(snap, series_getter=getter, hidden=hidden)
+
+        hidden, _ = fit_hidden(build, Console(width=width, file=io.StringIO()))
+        return _text(build(hidden), width)
 
     def test_prices_never_truncated_at_80_columns_with_trend(self):
         out = self._fit(80)

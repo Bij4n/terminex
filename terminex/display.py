@@ -303,12 +303,6 @@ def fit_hidden(
     return hidden, width
 
 
-def fit_table(build: Callable[[frozenset[str]], Table], console: Console) -> Table:
-    """Build the widest table that fits the console (see ``fit_hidden``)."""
-    hidden, _ = fit_hidden(build, console)
-    return build(hidden)
-
-
 def scroll_offset(selected: int, offset: int, visible: int, total: int) -> int:
     """First row to show so ``selected`` stays inside a window of ``visible``."""
     if visible >= total:
