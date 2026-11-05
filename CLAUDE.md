@@ -45,13 +45,20 @@ and sortable. Plans live in `ROADMAP.md`; every user-visible change goes in
 - `terminex/currencies.py` — BIS top-25 FX code list
 - `terminex/providers/base.py` — `Provider` ABC, `ProviderError`, `RateLimitError`,
   `finite_number` (payload validation), `parse_retry_after`,
-  `describe_request_error` (one-sentence error messages)
+  `describe_request_error` (one-sentence error messages), `user_agent` (honest UA)
 - `terminex/providers/fx_erapi.py` — open.er-api.com FX provider
 - `terminex/providers/crypto_coincap.py` — CoinCap v3 crypto provider (requires key)
+- `terminex/providers/crypto_coinlore.py` — CoinLore public tickers (keyless crypto fallback)
+- `terminex/providers/fallback.py` — `FallbackProvider(*feeds)`: serves from the first
+  healthy feed, rests failed ones (not the last), caption lists skipped feeds.
+  Chains are built in `app.default_providers`
 - `terminex/providers/crypto_coingecko.py` — CoinGecko public crypto provider
   (keyless default, includes 7-day sparkline history)
 - `terminex/providers/commodities_yahoo.py` — Yahoo Finance v8 spark, 14 futures
-  in one request, with 7-day history
+  in one request, with 7-day history; `host=` picks query1 or query2
+- `scripts/record_fixtures.py` — records trimmed real responses into `tests/fixtures/`
+- `scripts/canary.py` + `.github/workflows/canary.yml` — daily live check of every
+  feed; one issue (label `canary`) per failing feed, closed on recovery
 - `terminex/providers/watchlist_agg.py` — synthetic provider composing
   pinned quotes from other tabs' snapshots (no network I/O)
 
@@ -80,9 +87,10 @@ other tab states. FX pins are converted to USD per unit through
 
 `python3 -m unittest discover -s tests -t .` — stdlib only, no network
 (`requests.get` is mocked in provider tests; keyboard tests use a pty).
-`tests/test_app.py` builds a real `App` with fake providers in a temporary
-home, with full-frame render tests at several terminal sizes and a fake
-clock for refresh timing.
+`tests/test_app.py` builds a real `App` with injected fake providers (and a
+scripted keyboard for the main loop) in a temporary home, with full-frame
+render tests at several terminal sizes and a fake clock for refresh timing.
+`tests/test_fixtures.py` parses recorded real responses.
 CI runs Ubuntu and macOS on Python 3.11–3.14.
 
 ## Known quirks

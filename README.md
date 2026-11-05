@@ -118,16 +118,17 @@ terminex --tab commodity > commodities.txt
 
 ## Data sources
 
-| Asset       | Provider                       | Key required? | Notes                         |
-|-------------|--------------------------------|---------------|-------------------------------|
-| FX          | `open.er-api.com`              | no            | updates ~hourly               |
-| Crypto      | `coingecko.com` (default)      | no            | top 25 by mcap, ~1 min cache  |
-| Crypto      | `rest.coincap.io` (if key set) | yes (free)    | top 25, sub-minute, no history |
-| Commodities | `finance.yahoo.com` (spark)    | no            | 14 futures, ~10 min delayed   |
+| Asset       | Feeds, in order                                            | Key required?    | Notes                                  |
+|-------------|------------------------------------------------------------|------------------|----------------------------------------|
+| FX          | `open.er-api.com`                                          | no               | updates ~hourly                        |
+| Crypto      | `rest.coincap.io` (only if a key is set) → `coingecko.com` → `coinlore.com` | CoinCap: free key | top 25 by market cap; 7-day history from CoinGecko |
+| Commodities | `query1.finance.yahoo.com` → `query2.finance.yahoo.com`    | no               | 14 futures, ~10 min delayed            |
 
-The commodities feed uses Yahoo Finance's public but undocumented spark endpoint. If Yahoo changes or limits it, the Commodities tab shows an error and the other tabs keep working.
+When a feed fails, terminex serves the tab from the next one in its row and the caption under the table says so (for example "via coinlore.com (coingecko.com unavailable)"). A failed feed rests for a few minutes before it is tried again, and terminex switches back when it recovers.
 
-The crypto tab works out of the box via CoinGecko's public API. For higher-rate data, grab a free [CoinCap API key](https://coincap.io/) and export it. terminex uses CoinCap whenever a key is set (it does not fall back to CoinGecko if CoinCap fails):
+The commodities feed uses Yahoo Finance's public but undocumented spark endpoint, served from two hosts. If Yahoo changes or limits it, the Commodities tab shows an error and the other tabs keep working.
+
+The crypto tab works out of the box via CoinGecko's public API, with CoinLore behind it. For higher-rate data, grab a free [CoinCap API key](https://coincap.io/) and export it; CoinCap then leads the chain:
 
 ```bash
 export TERMINEX_COINCAP_KEY=your-key-here
@@ -173,6 +174,8 @@ terminex
 - Each provider must return a `Snapshot` of `Quote` objects — the renderer must not branch on provider identity
 - New providers go in `terminex/providers/` and implement the `Provider` ABC from `providers/base.py`
 - POSIX-only for now (keyboard handling uses `termios`/`tty`)
-- Run the test suite before opening a PR
+- Run the test suite before opening a PR: `python -m unittest discover -s tests -t .`
+- Provider tests parse real responses saved in `tests/fixtures/`; refresh them with `python scripts/record_fixtures.py` when a feed changes its format on purpose
+- `python scripts/canary.py` checks every live feed; the `canary` workflow runs it daily and opens an issue labelled `canary` when a feed fails
 
 Your terminal is already open. Your prices should be there too.
