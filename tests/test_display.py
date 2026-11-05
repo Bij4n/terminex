@@ -84,7 +84,8 @@ class TestWatchlistTrendSource(unittest.TestCase):
             asked.append((asset, symbol))
             return [1.10, 1.12]
 
-        quotes = [Quote("EUR", "Euro", 1.12, "USD", meta={"source_tab": "fx", "source_label": "FX"})]
+        quotes = [Quote("EUR", "Euro", 1.12, "USD", meta={
+            "source_tab": "fx", "source_label": "FX", "series_key": ("fx_usd", "EUR")})]
         snap = Snapshot("fx", "USD", quotes, datetime.now(tz=timezone.utc))
         out = _render(build_table(snap, is_watchlist=True, series_getter=getter))
         self.assertEqual(asked, [("fx_usd", "EUR")])

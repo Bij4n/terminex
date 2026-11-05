@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 
 DEFAULT_MAXLEN = 20
 
+# Series key for FX in USD per unit (the FX tab's own series are units per
+# base currency). Recorded by the app at each FX snapshot; watchlist FX
+# pins draw their trend from it.
+FX_USD = "fx_usd"
+
 
 class SeriesStore:
     def __init__(

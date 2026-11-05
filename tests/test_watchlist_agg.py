@@ -29,6 +29,12 @@ class TestWatchlistPrices(unittest.TestCase):
     def test_fx_pin_shows_usd_per_unit(self):
         self.assertAlmostEqual(self._fetch()["EUR"].price, 1.1237, places=4)
 
+    def test_series_keys_point_trends_at_usd_prices(self):
+        from terminex.series import FX_USD
+        rows = self._fetch()
+        self.assertEqual(rows["EUR"].meta["series_key"], (FX_USD, "EUR"))
+        self.assertEqual(rows["BTC"].meta["series_key"], ("crypto", "BTC"))
+
     def test_fx_pin_keeps_original_rate_in_meta(self):
         self.assertEqual(self._fetch()["EUR"].meta["fx_rate"], 0.889912)
 

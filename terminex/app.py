@@ -32,9 +32,9 @@ from .providers.fx_erapi import FxERApi
 from .alert_engine import AlertEngine, FireEvent
 from .providers.watchlist_agg import WatchlistAggregator
 from .quote import AssetClass, Quote, Snapshot
-from .series import SeriesStore
+from .series import FX_USD, SeriesStore
 from .store import open_store
-from .watchlist import Pin, load as load_watchlist, save as save_watchlist
+from .watchlist import load as load_watchlist, save as save_watchlist
 
 SORT_KEYS = ["default", "24h", "price"]
 
@@ -113,7 +113,6 @@ TAB_LABELS = {
     "watchlist": "Watch",
 }
 SOURCE_TABS: list[str] = ["fx", "crypto", "commodity"]
-FX_USD_SERIES = "fx_usd"  # series key for FX in USD per unit
 _FEED_NAMES = {"fx": "FX", "crypto": "crypto", "commodity": "commodity"}
 
 
@@ -396,7 +395,7 @@ class App:
                 # trends (the FX tab's series is units per base currency).
                 from .converter import fx_usd_per_unit
                 for code, usd in fx_usd_per_unit(snap).items():
-                    self.series.append(FX_USD_SERIES, code, usd)
+                    self.series.append(FX_USD, code, usd)
             if self.evaluate_alerts:
                 fires = self.alert_engine.evaluate(snap, tab_name)
                 if fires:

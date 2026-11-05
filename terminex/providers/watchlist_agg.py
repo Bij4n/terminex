@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from ..quote import AssetClass, Quote, Snapshot
+from ..series import FX_USD
 from ..watchlist import Watchlist
 from .base import Provider
 
@@ -50,11 +51,12 @@ class WatchlistAggregator(Provider):
         for pin in self.watchlist.pins:
             q = self.lookup(pin.asset_class, pin.symbol)
             price = q.price if q is not None else None
-            extra: dict = {}
+            # Trend series to draw: same units as the price column.
+            extra: dict = {"series_key": (pin.asset_class, pin.symbol)}
             if q is not None and pin.asset_class == "fx":
                 usd = self.fx_usd_price(q.symbol) if self.fx_usd_price else None
                 price = usd
-                extra = {"fx_rate": q.price}
+                extra = {"fx_rate": q.price, "series_key": (FX_USD, pin.symbol)}
             if q is None or price is None:
                 label = _TAB_LABELS[pin.asset_class]
                 failed = bool(self.source_failed and self.source_failed(pin.asset_class))

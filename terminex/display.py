@@ -121,18 +121,16 @@ def _delta_cell(current: float, previous: float | None) -> Text:
     return Text(f"{arrow} {pct:+.2f}%", style=theme.pct_style(diff))
 
 
-def _trend_cell(q, asset: str, series_getter: SeriesGetter, is_watchlist: bool) -> Text:
+def _trend_cell(q, asset: str, series_getter: SeriesGetter) -> Text:
     """Provider history (7 days) when available, else the live series."""
     history = q.meta.get("history")
     if history:
         return render_sparkline(
             history, width=TREND_WIDTH, change_pct=q.meta.get("change_7d_pct")
         )
-    if is_watchlist and asset == "fx":
-        # Watchlist shows USD per unit; the FX tab's series is per-base
-        # rates, so FX pins use the USD series the app records per snapshot.
-        asset = "fx_usd"
-    return render_sparkline(series_getter(asset, q.symbol), width=TREND_WIDTH)
+    # Rows can name the series to draw (watchlist FX pins use USD prices).
+    series_asset, series_symbol = q.meta.get("series_key") or (asset, q.symbol)
+    return render_sparkline(series_getter(series_asset, series_symbol), width=TREND_WIDTH)
 
 
 # Columns that may be dropped to fit a narrow terminal, least useful first.
@@ -273,7 +271,7 @@ def build_table(
             row.append(f"/{unit}" if unit else "")
         row.append(pct_text)
         if show_trend:
-            row.append(_trend_cell(q, row_asset or asset, series_getter, is_watchlist))
+            row.append(_trend_cell(q, row_asset or asset, series_getter))
         if show_delta:
             row.append(delta_text)
         row_style = theme.HIGHLIGHT_ROW_STYLE if is_selected else None
