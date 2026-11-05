@@ -108,7 +108,11 @@ class TestStartupInterrupted(unittest.TestCase):
             with mock.patch("terminex.keyboard.tty.setcbreak", setcbreak_then_signal):
                 with self.assertRaises(SystemExit):
                     kb.start()
-            self.assertEqual(termios.tcgetattr(slave), before)
+            # Compare the modes that matter. macOS also sets PENDIN (a kernel
+            # bookkeeping bit) on restore, so a whole-struct compare fails there.
+            mask = termios.ICANON | termios.ECHO | termios.ISIG
+            self.assertEqual(termios.tcgetattr(slave)[3] & mask, before[3] & mask)
+            self.assertTrue(before[3] & termios.ICANON)
         finally:
             os.close(master)
             os.close(slave)
