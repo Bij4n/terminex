@@ -87,6 +87,31 @@ class TestListenerOverPty(unittest.TestCase):
 
 
 
+class TestTerminalGoesAway(unittest.TestCase):
+    def test_reader_thread_exits_when_select_fails(self):
+        """EBADF from select must end the thread, not spin a core."""
+        from unittest import mock
+
+        master, slave = os.openpty()
+        kb = KeyboardListener(fd=slave)
+        calls = []
+
+        def broken_select(*args):
+            calls.append(1)
+            raise OSError(9, "Bad file descriptor")
+
+        with mock.patch("terminex.keyboard.select.select", broken_select):
+            kb.start()
+            thread = kb._thread
+            thread.join(timeout=1.0)
+            alive = thread.is_alive()
+        kb.stop()
+        os.close(master)
+        os.close(slave)
+        self.assertFalse(alive)
+        self.assertLess(len(calls), 5)
+
+
 class TestStartupInterrupted(unittest.TestCase):
     """A signal landing mid-start must not leave the tty in cbreak mode."""
 

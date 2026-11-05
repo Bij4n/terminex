@@ -143,7 +143,11 @@ class KeyboardListener:
             return
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         while not self._stop.is_set():
-            if not _has_pending(fd, _POLL_INTERVAL):
+            try:
+                ready, _, _ = select.select([fd], [], [], _POLL_INTERVAL)
+            except (OSError, ValueError):
+                return  # the terminal went away; don't spin on a dead fd
+            if not ready:
                 continue
             data = self._read(fd)
             if not data:
