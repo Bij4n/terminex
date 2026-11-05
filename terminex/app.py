@@ -200,6 +200,7 @@ class App:
         self.alert_engine = AlertEngine(self.store)
         self.series = SeriesStore(db=self.store)
         self.show_sparklines = False
+        self.evaluate_alerts = True  # off for --once: a print, not a watch
         self._last_age: str = ""
 
     def _lookup_pinned_quote(
@@ -397,9 +398,10 @@ class App:
                 from .converter import fx_usd_per_unit
                 for code, usd in fx_usd_per_unit(snap).items():
                     self.series.append(FX_USD_SERIES, code, usd)
-            fires = self.alert_engine.evaluate(snap, tab_name)
-            if fires:
-                self._handle_alert_fires(fires)
+            if self.evaluate_alerts:
+                fires = self.alert_engine.evaluate(snap, tab_name)
+                if fires:
+                    self._handle_alert_fires(fires)
         # A source-tab refresh invalidates any existing watchlist snapshot.
         if (
             tab_name in SOURCE_TABS
@@ -976,6 +978,47 @@ class App:
         with _exit_on_signals():
             return self._run()
 
+    def run_once(self) -> int:
+        """Print the active tab once and exit (``--once``, or piped output).
+
+        Alerts are not evaluated: a cron job calling this every minute
+        would otherwise re-fire every alert whose condition holds.
+        """
+        self.evaluate_alerts = False
+        try:
+            tab = self.active_tab
+            self._refresh(tab)
+            state = self.tabs[tab]
+            if tab == "watchlist" and not self.watchlist.pins:
+                print("terminex: no symbols pinned", file=sys.stderr)
+                return 1
+            if state.last_snapshot is None:
+                print(f"terminex: {state.last_error or 'no data'}", file=sys.stderr)
+                return 1
+            snap = replace(
+                state.last_snapshot,
+                quotes=_sort_quotes(
+                    state.last_snapshot.quotes, state.sort_key, state.sort_desc
+                ),
+            )
+            pinned = {(p.asset_class, p.symbol) for p in self.watchlist.pins}
+
+            def build(hidden, rows=None):
+                return build_table(
+                    snap,
+                    pinned_set=pinned,
+                    current_tab_asset=TAB_TO_ASSET_CLASS.get(tab),
+                    is_watchlist=tab == "watchlist",
+                    # one snapshot has no "since last" to compare with
+                    hidden=hidden | {"delta"},
+                )
+
+            hidden, _ = fit_hidden(build, self.console)
+            self.console.print(build(hidden))
+            return 0
+        finally:
+            self.store.close()
+
     def _run(self) -> int:
         # eager first fetch for the active tab
         self._refresh(self.active_tab)
@@ -1075,7 +1118,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="tab to launch on",
     )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="print the tab once and exit (automatic when output is not a terminal)",
+    )
     return parser.parse_args(argv)
+
+
+def _wants_once(args: argparse.Namespace, stdout) -> bool:
+    """One-shot mode: asked for, or output is going to a pipe or file."""
+    return bool(args.once) or not stdout.isatty()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1087,6 +1140,8 @@ def main(argv: list[str] | None = None) -> int:
         config = replace(config, active_tab=args.tab)
     interval = args.interval if args.interval is not None else config.refresh_interval
     app = App(config=config, interval=interval)
+    if _wants_once(args, sys.stdout):
+        return app.run_once()
     return app.run()
 
 

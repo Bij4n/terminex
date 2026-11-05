@@ -268,5 +268,50 @@ class TestFrameTooNarrow(FrameSizeMixin, AppTestCase):
         self.assertNotIn("80,5…", text)
 
 
+
+class TestRunOnce(AppTestCase):
+    def test_prints_the_table_and_exits_zero(self):
+        self.assertEqual(self.app.run_once(), 0)
+        out = self.app.console.file.getvalue()
+        self.assertIn("BTC", out)
+        self.assertIn("80,000.00", out)
+        self.assertNotIn("? for keys", out)
+        self.assertNotIn("since last", out)
+
+    def test_failure_goes_to_stderr_with_exit_one(self):
+        import contextlib
+        self.app.tabs["crypto"].provider = FakeProvider(error=ProviderError("can't reach fake.example"))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.app.run_once(), 1)
+        self.assertIn("can't reach fake.example", err.getvalue())
+
+    def test_alerts_are_not_evaluated(self):
+        from terminex import alerts as alerts_dao
+        alerts_dao.create(self.app.store, asset_class="crypto", symbol="BTC",
+                          op=">", threshold=1.0, recurring=True)
+        self.app.run_once()
+        import sqlite3
+        from terminex.store import db_path
+        with sqlite3.connect(db_path()) as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM fires").fetchone()[0], 0)
+
+
+class TestOnceRouting(unittest.TestCase):
+    def test_once_flag_or_non_terminal_output(self):
+        from terminex.app import _wants_once, parse_args
+
+        class Out:
+            def __init__(self, tty):
+                self.tty = tty
+
+            def isatty(self):
+                return self.tty
+
+        self.assertTrue(_wants_once(parse_args(["--once"]), Out(True)))
+        self.assertTrue(_wants_once(parse_args([]), Out(False)))
+        self.assertFalse(_wants_once(parse_args([]), Out(True)))
+
+
 if __name__ == "__main__":
     unittest.main()
