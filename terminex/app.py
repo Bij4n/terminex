@@ -354,12 +354,11 @@ class App:
     # ---- fetch / tab machinery ----
 
     def _refresh(self, tab_name: str) -> None:
-        # Watchlist reads from source tabs' already-fetched data.
-        # Ensure each source tab has at least attempted a fetch.
+        # The watchlist reads the source tabs' snapshots, so while it is open
+        # it keeps the feeds that have pins fresh on their own schedules.
         if tab_name == "watchlist":
-            for src in SOURCE_TABS:
-                src_state = self.tabs[src]
-                if src_state.last_snapshot is None and src_state.last_error is None:
+            for src in self._pinned_sources():
+                if self._needs_refresh(src):
                     self._refresh(src)
         state = self.tabs[tab_name]
         now = time.monotonic()
@@ -410,8 +409,28 @@ class App:
         ):
             self.tabs["watchlist"].last_fetch_attempt = 0.0
 
+    def _pinned_sources(self) -> list[str]:
+        pinned = {p.asset_class for p in self.watchlist.pins}
+        return [src for src in SOURCE_TABS if src in pinned]
+
+    def _poll(self) -> bool:
+        """One scheduling step of the main loop; True if anything changed."""
+        if self._needs_refresh(self.active_tab):
+            self._refresh(self.active_tab)
+            return True
+        return False
+
     def _manual_refresh(self, tab_name: str) -> None:
         """`r`: refresh now unless the provider can't give anything new yet."""
+        if tab_name == "watchlist":
+            # Retry any pinned feed that failed, then recompose the rows.
+            now = time.monotonic()
+            for src in self._pinned_sources():
+                src_state = self.tabs[src]
+                if src_state.last_error is not None and now >= src_state.backoff_until:
+                    self._refresh(src)
+            self._refresh("watchlist")
+            return
         state = self.tabs[tab_name]
         provider = state.provider
         now = time.monotonic()
@@ -1050,8 +1069,7 @@ class App:
                             break
                     if self.should_quit:
                         break
-                    if self._needs_refresh(self.active_tab):
-                        self._refresh(self.active_tab)
+                    if self._poll():
                         dirty = True
                     # toast expiration forces a redraw
                     if self._toast is not None and self._active_toast() is None:

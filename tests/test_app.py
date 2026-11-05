@@ -326,5 +326,51 @@ class TestHelpAt80x24(AppTestCase):
             self.assertIn(key, text)
 
 
+
+class TestWatchlistKeepsPolling(AppTestCase):
+    """Staying on the watchlist must keep its pinned feeds fresh."""
+
+    def setUp(self):
+        super().setUp()
+        self.clock = Clock()
+        patcher = mock.patch("terminex.app.time.monotonic", self.clock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.app.watchlist.toggle("fx", "EUR")
+        self.fx = FakeProvider(asset_class="fx", error=ProviderError("can't reach fake.example"),
+                               floor=300.0)
+        self.app.tabs["fx"].provider = self.fx
+        self.app.active_tab = "watchlist"
+
+    def _row(self):
+        return {q.symbol: q for q in self.app.tabs["watchlist"].last_snapshot.quotes}["EUR"]
+
+    def test_failed_feed_recovers_while_on_the_watchlist(self):
+        self.app._poll()
+        self.assertTrue(self._row().meta.get("unavailable"))
+        self.fx.error = None
+        self.fx.quotes = [Quote("USD", "US Dollar", 1.0, "USD"), Quote("EUR", "Euro", 0.89, "USD")]
+        self.clock.now += 30
+        self.app._poll()
+        self.assertAlmostEqual(self._row().price, 1 / 0.89)
+
+    def test_prices_update_while_on_the_watchlist(self):
+        self.fx.error = None
+        self.fx.quotes = [Quote("USD", "US Dollar", 1.0, "USD"), Quote("EUR", "Euro", 0.89, "USD")]
+        self.app._poll()
+        self.fx.quotes = [Quote("USD", "US Dollar", 1.0, "USD"), Quote("EUR", "Euro", 0.80, "USD")]
+        self.clock.now += 300
+        self.app._poll()
+        self.assertAlmostEqual(self._row().price, 1 / 0.80)
+
+    def test_unpinned_feeds_are_not_polled(self):
+        crypto = FakeProvider()
+        self.app.tabs["crypto"].provider = crypto
+        self.app._poll()
+        self.clock.now += 300
+        self.app._poll()
+        self.assertEqual(crypto.calls, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
