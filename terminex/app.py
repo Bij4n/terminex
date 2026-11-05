@@ -346,6 +346,12 @@ class App:
         except ProviderError as exc:
             state.last_error = str(exc)
             return
+        except Exception as exc:  # a provider bug must not take down the app
+            state.last_error = (
+                f"{state.provider.name} sent something terminex couldn't read "
+                f"({type(exc).__name__}: {exc})"
+            )
+            return
         # rotate previous → current
         if state.last_snapshot is not None:
             state.previous_rates = state.last_snapshot.as_rate_map()

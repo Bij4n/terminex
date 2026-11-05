@@ -29,6 +29,18 @@ class RateLimitError(ProviderError):
 MAX_RETRY_AFTER = 3600.0
 
 
+def finite_number(value: object) -> float | None:
+    """``value`` as a float if it is a real, finite number, else None.
+
+    API payloads are untrusted: booleans, strings, NaN and infinity must
+    not reach prices, percentages or sparkline arithmetic.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
 def parse_retry_after(value: str | None, default: float) -> float:
     """Seconds to wait from a ``Retry-After`` header.
 

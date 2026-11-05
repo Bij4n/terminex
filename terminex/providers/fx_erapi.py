@@ -8,7 +8,7 @@ import requests
 
 from ..currencies import NAMES, TOP_25
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError
+from .base import Provider, ProviderError, finite_number
 
 API_URL = "https://open.er-api.com/v6/latest/{base}"
 TIMEOUT = 10.0
@@ -60,10 +60,9 @@ class FxERApi(Provider):
             if code == self.base:
                 price = 1.0
             else:
-                val = rates.get(code)
-                if val is None:
+                price = finite_number(rates.get(code))
+                if price is None or price <= 0:
                     continue
-                price = float(val)
             quotes.append(
                 Quote(
                     symbol=code,

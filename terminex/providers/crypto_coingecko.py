@@ -13,7 +13,13 @@ from datetime import datetime, timezone
 import requests
 
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError, RateLimitError, parse_retry_after
+from .base import (
+    Provider,
+    ProviderError,
+    RateLimitError,
+    finite_number,
+    parse_retry_after,
+)
 
 API_URL = "https://api.coingecko.com/api/v3/coins/markets"
 TIMEOUT = 10.0
@@ -74,15 +80,10 @@ class CryptoCoinGecko(Provider):
             name = entry.get("name")
             if price is None or symbol is None:
                 continue
-            try:
-                price_f = float(price)
-            except (TypeError, ValueError):
+            price_f = finite_number(price)
+            if price_f is None or price_f <= 0:
                 continue
-            change = entry.get("price_change_percentage_24h")
-            try:
-                change_f = float(change) if change is not None else None
-            except (TypeError, ValueError):
-                change_f = None
+            change_f = finite_number(entry.get("price_change_percentage_24h"))
             rank = entry.get("market_cap_rank")
             try:
                 rank_i = int(rank) if rank is not None else None
@@ -94,9 +95,9 @@ class CryptoCoinGecko(Provider):
             history = _history(entry.get("sparkline_in_7d"))
             if history:
                 meta["history"] = history
-            change_7d = entry.get("price_change_percentage_7d_in_currency")
-            if isinstance(change_7d, (int, float)):
-                meta["change_7d_pct"] = float(change_7d)
+            change_7d = finite_number(entry.get("price_change_percentage_7d_in_currency"))
+            if change_7d is not None:
+                meta["change_7d_pct"] = change_7d
             quotes.append(
                 Quote(
                     symbol=str(symbol).upper(),
@@ -125,4 +126,4 @@ def _history(sparkline: object) -> list[float]:
     prices = sparkline.get("price")
     if not isinstance(prices, list):
         return []
-    return [float(p) for p in prices if isinstance(p, (int, float)) and p > 0]
+    return [n for n in (finite_number(p) for p in prices) if n is not None and n > 0]

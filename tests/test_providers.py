@@ -106,6 +106,62 @@ class TestCommoditiesYahoo(unittest.TestCase):
         with self.assertRaises(ProviderError):
             self._fetch(status=404, payload=None)
 
+    def test_malformed_entries_are_skipped_not_fatal(self):
+        payload = {
+            "GC=F": {"close": 3},                                   # not a list
+            "ZW=F": {"close": [True, float("nan"), float("inf")]},  # no usable numbers
+            "SI=F": {"close": [50.0, 51.0], "previousClose": "x",
+                     "chartPreviousClose": float("inf"), "end": 10**20},
+        }
+        snap, _ = self._fetch(payload=payload)
+        self.assertEqual([q.symbol for q in snap.quotes], ["SI.F"])
+        silver = snap.quotes[0]
+        self.assertEqual(silver.price, 51.0)
+        self.assertIsNone(silver.change_24h_pct)
+        self.assertNotIn("change_7d_pct", silver.meta)
+        self.assertIsNone(snap.provider_time)
+
+    def test_only_malformed_entries_is_a_provider_error(self):
+        with self.assertRaises(ProviderError):
+            self._fetch(payload={"GC=F": {"close": "4040"}})
+
+
+class TestFxPayloads(unittest.TestCase):
+    def test_non_numeric_rate_is_skipped(self):
+        from terminex.providers.fx_erapi import FxERApi
+        resp = _response(200, {"result": "success", "rates": {"EUR": "abc", "JPY": 158.0, "GBP": None}})
+        with mock.patch("terminex.providers.fx_erapi.requests.get", return_value=resp):
+            symbols = [q.symbol for q in FxERApi().fetch().quotes]
+        self.assertIn("JPY", symbols)
+        self.assertNotIn("EUR", symbols)
+
+
+class TestCoinCapPayloads(unittest.TestCase):
+    def test_strings_nan_and_bad_entries(self):
+        from terminex.providers.crypto_coincap import CryptoCoinCap
+        resp = _response(200, {"timestamp": 10**30, "data": [
+            "junk",
+            {"symbol": "BTC", "name": "Bitcoin", "priceUsd": "nan"},
+            {"symbol": "ETH", "name": "Ethereum", "priceUsd": "2400.5", "changePercent24Hr": "inf"},
+        ]})
+        with mock.patch("terminex.providers.crypto_coincap.requests.get", return_value=resp):
+            snap = CryptoCoinCap(api_key="k").fetch()
+        self.assertEqual([(q.symbol, q.price, q.change_24h_pct) for q in snap.quotes], [("ETH", 2400.5, None)])
+        self.assertIsNone(snap.provider_time)
+
+
+class TestCoinGeckoPayloads(unittest.TestCase):
+    def test_non_finite_values_are_dropped(self):
+        resp = _response(200, [
+            {"symbol": "btc", "name": "Bitcoin", "current_price": float("inf")},
+            {"symbol": "eth", "name": "Ethereum", "current_price": 2400,
+             "sparkline_in_7d": {"price": [2300, float("nan"), True, 2400]}},
+        ])
+        with mock.patch("terminex.providers.crypto_coingecko.requests.get", return_value=resp):
+            quotes = CryptoCoinGecko().fetch().quotes
+        self.assertEqual([q.symbol for q in quotes], ["ETH"])
+        self.assertEqual(quotes[0].meta["history"], [2300.0, 2400.0])
+
 
 
 class TestRetryAfter(unittest.TestCase):

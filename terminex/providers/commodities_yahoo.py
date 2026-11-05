@@ -18,7 +18,13 @@ from importlib.metadata import PackageNotFoundError, version
 import requests
 
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError, RateLimitError, parse_retry_after
+from .base import (
+    Provider,
+    ProviderError,
+    RateLimitError,
+    finite_number,
+    parse_retry_after,
+)
 
 API_URL = "https://query1.finance.yahoo.com/v8/finance/spark"
 TIMEOUT = 10.0
@@ -105,24 +111,27 @@ class CommoditiesYahoo(Provider):
             raise ProviderError(f"{self.name} sent an unexpected payload")
 
         quotes: list[Quote] = []
-        latest: int | None = None
+        latest: datetime | None = None
         for yahoo_sym, name, unit, in_cents in self.symbols:
             entry = payload.get(yahoo_sym)
             if not isinstance(entry, dict):
                 continue
+            closes = entry.get("close")
+            if not isinstance(closes, list):
+                continue
             scale = 0.01 if in_cents else 1.0
             history = [
-                float(c) * scale
-                for c in entry.get("close") or []
-                if isinstance(c, (int, float))
+                n * scale
+                for n in (finite_number(c) for c in closes)
+                if n is not None and n > 0
             ]
             if not history:
                 continue
             price = history[-1]
             prev = _positive(entry.get("previousClose"), scale)
             week_ago = _positive(entry.get("chartPreviousClose"), scale)
-            end = entry.get("end")
-            if isinstance(end, int) and (latest is None or end > latest):
+            end = _timestamp(entry.get("end"))
+            if end is not None and (latest is None or end > latest):
                 latest = end
             meta: dict = {"unit": unit, "history": history}
             if week_ago:
@@ -148,16 +157,21 @@ class CommoditiesYahoo(Provider):
             quote_ccy="USD",
             quotes=quotes,
             fetched_at=datetime.now(tz=timezone.utc),
-            provider_time=(
-                datetime.fromtimestamp(latest, tz=timezone.utc)
-                if latest is not None
-                else None
-            ),
+            provider_time=latest,
             provider_name=self.name,
         )
 
 
 def _positive(value: object, scale: float) -> float | None:
-    if isinstance(value, (int, float)) and value > 0:
-        return float(value) * scale
-    return None
+    number = finite_number(value)
+    return number * scale if number is not None and number > 0 else None
+
+
+def _timestamp(value: object) -> datetime | None:
+    seconds = finite_number(value)
+    if seconds is None:
+        return None
+    try:
+        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
