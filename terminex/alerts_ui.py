@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -89,7 +91,7 @@ def render_alert_list_panel(
                 f"{a.op} {a.threshold:g}", style=f"bold {theme.WARN}"
             )
             mode = "recurring" if a.recurring else "once"
-            last = a.last_fired_at.split("T")[0] if a.last_fired_at else "—"
+            last = format_local_time(a.last_fired_at)
             tbl.add_row(
                 str(a.id), status, a.asset_class, a.symbol, condition, mode, last
             )
@@ -127,3 +129,16 @@ def _fmt(value: float) -> str:
     if value >= 1:
         return f"{value:.4f}"
     return f"{value:.6f}"
+
+
+def format_local_time(iso_utc: str | None) -> str:
+    """``2026-11-05T04:21:55+00:00`` → ``2026-11-04 20:21`` in local time."""
+    if not iso_utc:
+        return "—"
+    try:
+        stamp = datetime.fromisoformat(iso_utc)
+    except ValueError:
+        return iso_utc
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone().strftime("%Y-%m-%d %H:%M")
