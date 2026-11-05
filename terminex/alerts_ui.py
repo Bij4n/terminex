@@ -19,11 +19,13 @@ def render_alert_new_panel(draft: dict) -> Panel:
     asset_class = draft["asset_class"]
     symbol = draft["symbol"]
     current = draft["current_price"]
+    unit = draft.get("unit", "")
+    unit_suffix = f" {unit}" if unit else ""
 
     table.add_row(
         Text(
             f"Create alert on {asset_class.upper()}:{symbol}  "
-            f"(current: {_fmt(current)})",
+            f"(current: {_fmt(current)}{unit_suffix})",
             style=f"bold {theme.ACCENT}",
         )
     )
@@ -36,6 +38,8 @@ def render_alert_new_panel(draft: dict) -> Panel:
     line.append("  ", style="")
     line.append(draft["threshold_buffer"], style="bold white")
     line.append("▏", style=f"bold {theme.WARN}")
+    if unit:
+        line.append(f" {unit}", style=theme.MUTED)
     table.add_row(line)
 
     recurring_line = Text()

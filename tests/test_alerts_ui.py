@@ -6,7 +6,7 @@ import os
 import time
 import unittest
 
-from terminex.alerts_ui import format_local_time
+from terminex.alerts_ui import format_local_time, render_alert_new_panel
 
 
 @unittest.skipUnless(hasattr(time, "tzset"), "needs time.tzset (POSIX)")
@@ -29,6 +29,25 @@ class TestLocalTime(unittest.TestCase):
 
     def test_missing_value(self):
         self.assertEqual(format_local_time(None), "—")
+
+
+class TestAlertModalUnits(unittest.TestCase):
+    def _plain(self, draft) -> str:
+        import io
+        from rich.console import Console
+        console = Console(width=100, file=io.StringIO(), color_system=None)
+        console.print(render_alert_new_panel(draft))
+        return console.file.getvalue()
+
+    def test_fx_alert_states_its_units(self):
+        out = self._plain({
+            "asset_class": "fx", "symbol": "EUR", "current_price": 0.889912,
+            "unit": "EUR per 1 USD", "op": ">", "threshold_buffer": "0.8899",
+            "recurring": False, "error": None,
+        })
+        header, condition = [l for l in out.splitlines() if "EUR per 1 USD" in l]
+        self.assertIn("current:", header)
+        self.assertIn("price is", condition)
 
 
 if __name__ == "__main__":

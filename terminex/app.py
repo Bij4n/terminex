@@ -201,6 +201,18 @@ class App:
                 return q
         return None
 
+    def _alert_unit(self, asset_class: str, symbol: str, quote: Quote) -> str:
+        """Units the alert threshold is in (alerts compare source-tab prices).
+
+        FX alerts are on the FX tab's rate, which is "units per 1 base" —
+        not the USD price the watchlist shows — so say so in the modal.
+        """
+        if asset_class == "fx":
+            base = getattr(self.tabs["fx"].provider, "base", "USD")
+            return f"{symbol} per 1 {base}"
+        unit = quote.meta.get("unit")
+        return f"USD/{unit}" if unit else "USD"
+
     def _fx_usd_price(self, code: str) -> float | None:
         from .converter import fx_usd_per_unit
         snap = self.tabs["fx"].last_snapshot
@@ -671,6 +683,7 @@ class App:
                 "asset_class": asset_class,
                 "symbol": symbol,
                 "current_price": price.price,
+                "unit": self._alert_unit(asset_class, symbol, price),
                 "op": ">",
                 "threshold_buffer": f"{price.price:.4f}".rstrip("0").rstrip("."),
                 "recurring": False,
