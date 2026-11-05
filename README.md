@@ -57,6 +57,7 @@ python3 -m terminex
 terminex --base EUR        # FX base currency (default: USD)
 terminex --tab crypto      # start on a specific tab (fx|crypto|commodity|watchlist)
 terminex --interval 15     # refresh interval in seconds (default: 10)
+terminex --version         # print the installed version
 ```
 
 ## Features
@@ -146,7 +147,7 @@ Stdlib `unittest` only — no extra dependencies. Covers the pure-logic modules:
 
 ## Contributing
 
-Bug reports and pull requests are welcome at https://github.com/Bij4n/terminex/issues.
+Bug reports and pull requests are welcome at https://github.com/Bij4n/terminex/issues. See [ROADMAP.md](ROADMAP.md) for what's planned next.
 
 ```bash
 git clone https://github.com/Bij4n/terminex.git
