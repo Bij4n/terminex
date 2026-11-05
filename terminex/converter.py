@@ -18,7 +18,7 @@ from . import theme
 from .quote import Snapshot
 
 # Case-insensitive. Amount allows commas as thousand-separators and a
-# decimal point. Symbols are word chars plus ``.`` (for stooq futures
+# decimal point. Symbols are word chars plus ``.`` (for futures
 # like ``GC.F``) and ``_``.
 _PATTERN = re.compile(
     r"""

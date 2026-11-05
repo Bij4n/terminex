@@ -25,7 +25,7 @@ from .help import render_filter_bar, render_help_panel
 from .keyboard import KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, KeyboardListener
 from .statusbar import render_status_bar
 from .providers.base import Provider, ProviderError, RateLimitError
-from .providers.commodities_stooq import CommoditiesStooq
+from .providers.commodities_yahoo import CommoditiesYahoo
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.crypto_coingecko import CryptoCoinGecko
 from .providers.fx_erapi import FxERApi
@@ -162,7 +162,7 @@ class App:
         self.tabs: dict[str, TabState] = {
             "fx": TabState(FxERApi(base=config.base_currency)),
             "crypto": TabState(crypto_provider),
-            "commodity": TabState(CommoditiesStooq()),
+            "commodity": TabState(CommoditiesYahoo()),
         }
         self.watchlist = load_watchlist()
         self.tabs["watchlist"] = TabState(

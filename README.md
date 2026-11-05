@@ -8,7 +8,7 @@ terminex keeps a persistent, keyboard-navigable price table in your terminal wit
 
 - **FX** — top 25 most-traded currencies (BIS triennial survey), updated hourly
 - **Crypto** — top 25 coins by market cap via CoinGecko (no key required) or CoinCap (free key, faster)
-- **Commodities** — 14 futures across metals, energy, and agriculturals via Stooq (~15 min delayed)
+- **Commodities** — 14 futures across metals, energy, and agriculturals via Yahoo Finance (~10 min delayed), all in USD per unit
 - **Watchlist** — a synthetic view composing your pinned rows from all three tabs in one place
 
 ## Install
@@ -80,7 +80,7 @@ Press `c` to open a conversion prompt that resolves across all three asset class
 1,000 USD in GBP
 ```
 
-Press `Enter` to compute, `Esc` to close. The last 5 results stay visible above the prompt. Commodity symbols use Stooq notation (`GC.F` for gold, `CL.F` for crude, etc.).
+Press `Enter` to compute, `Esc` to close. The last 5 results stay visible above the prompt. Commodity symbols use futures notation (`GC.F` for gold, `CL.F` for WTI crude, `BZ.F` for Brent, etc.).
 
 ### Price alerts
 
@@ -111,7 +111,9 @@ Press `w` on any row in the FX, Crypto, or Commodities tabs to pin it. Press `4`
 | FX          | `open.er-api.com`              | no            | updates ~hourly               |
 | Crypto      | `coingecko.com` (default)      | no            | top 25 by mcap, ~1 min cache  |
 | Crypto      | `rest.coincap.io` (if key set) | yes (free)    | top 25 by mcap, sub-minute    |
-| Commodities | `stooq.com` (CSV)              | no            | 14 futures, ~15 min delayed   |
+| Commodities | `finance.yahoo.com` (spark)    | no            | 14 futures, ~10 min delayed   |
+
+The commodities feed uses Yahoo Finance's public but undocumented spark endpoint. If Yahoo changes or limits it, the Commodities tab shows an error and the other tabs keep working.
 
 The crypto tab works out of the box via CoinGecko's public API. For higher-rate data, grab a free [CoinCap API key](https://coincap.io/) and export it — terminex automatically prefers it when present:
 

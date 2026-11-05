@@ -116,9 +116,6 @@ def build_table(
     caption_parts: list[str] = []
     if snapshot.provider_name and not is_watchlist:
         caption_parts.append(f"via {snapshot.provider_name}")
-    has_unit_notes = any(q.meta.get("unit_note") for q in snapshot.quotes)
-    if has_unit_notes:
-        caption_parts.append("† exchange pts (not USD/unit)")
 
     table = Table(
         title=title,
@@ -142,6 +139,8 @@ def build_table(
         table.add_column(
             _ASSET_PRICE_COLS[asset].format(ccy=ccy), justify="right"
         )
+        if asset == "commodity":
+            table.add_column("Unit", style=theme.MUTED)
     table.add_column("24h %", justify="right")
     if series_getter is not None:
         table.add_column("Trend", justify="left", no_wrap=True)
@@ -165,10 +164,7 @@ def build_table(
             pct_text = Text("·", style=theme.NEUTRAL)
             delta_text = Text("·", style=theme.NEUTRAL)
         else:
-            price_str = _format_price(q.price)
-            if q.meta.get("unit_note"):
-                price_str += " †"
-            price_text = Text(price_str)
+            price_text = Text(_format_price(q.price))
             pct_text = _format_pct(q.change_24h_pct)
             prev_val = previous.get(q.symbol) if previous else None
             delta_text = _delta_cell(q.price, prev_val)
@@ -180,7 +176,11 @@ def build_table(
         row: list = [pointer, star, str(idx)]
         if is_watchlist:
             row.append(q.meta.get("source_label", "?"))
-        row += [q.symbol, q.name, price_text, pct_text]
+        row += [q.symbol, q.name, price_text]
+        if asset == "commodity" and not is_watchlist:
+            unit = q.meta.get("unit")
+            row.append(f"/{unit}" if unit else "")
+        row.append(pct_text)
         if series_getter is not None:
             series_key_asset = row_asset or asset
             series = series_getter(series_key_asset, q.symbol)
