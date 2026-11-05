@@ -131,9 +131,10 @@ class CommoditiesYahoo(Provider):
             price = history[-1]
             prev = _positive(entry.get("previousClose"), scale)
             week_ago = _positive(entry.get("chartPreviousClose"), scale)
-            end = _timestamp(entry.get("end"))
-            if end is not None and (latest is None or end > latest):
-                latest = end
+            stamps = entry.get("timestamp")
+            last = _timestamp(stamps[-1]) if isinstance(stamps, list) and stamps else None
+            if last is not None and (latest is None or last > latest):
+                latest = last
             meta: dict = {"unit": unit, "history": history}
             if week_ago:
                 meta["change_7d_pct"] = (price - week_ago) / week_ago * 100.0

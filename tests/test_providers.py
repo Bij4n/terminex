@@ -84,6 +84,14 @@ class TestCommoditiesYahoo(unittest.TestCase):
         self.assertAlmostEqual(wheat.price, 6.12)
         self.assertEqual(wheat.meta["unit"], "bu")
 
+    def test_provider_time_is_the_latest_data_point(self):
+        # `end` marks the end of the *first* session in the range; the
+        # latest quote time is the last timestamp.
+        payload = {"GC=F": {"close": [4000.0, 4040.0], "timestamp": [1793300000, 1793856524],
+                            "end": 1793332740}}
+        snap, _ = self._fetch(payload=payload)
+        self.assertEqual(int(snap.provider_time.timestamp()), 1793856524)
+
     def test_history_and_7d_change_in_meta(self):
         gold = self._fetch()[0].quotes[0]
         self.assertEqual(gold.meta["history"], [3950.0, 4010.0, 4040.0])
@@ -116,7 +124,7 @@ class TestCommoditiesYahoo(unittest.TestCase):
             "GC=F": {"close": 3},                                   # not a list
             "ZW=F": {"close": [True, float("nan"), float("inf")]},  # no usable numbers
             "SI=F": {"close": [50.0, 51.0], "previousClose": "x",
-                     "chartPreviousClose": float("inf"), "end": 10**20},
+                     "chartPreviousClose": float("inf"), "timestamp": [1, 10**20]},
         }
         snap, _ = self._fetch(payload=payload)
         self.assertEqual([q.symbol for q in snap.quotes], ["SI.F"])
