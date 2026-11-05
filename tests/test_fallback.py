@@ -86,8 +86,19 @@ class TestFallbackProvider(unittest.TestCase):
         self.assertIn("coincap.io returned HTTP 401", str(ctx.exception))
         self.assertIn("can't reach coingecko.com", str(ctx.exception))
 
-    def test_secondary_rate_limit_keeps_its_type(self):
+    def test_rate_limited_last_feed_rests_while_the_first_is_retried(self):
         self.primary.error = ProviderError("down")
+        self.secondary.error = RateLimitError("coingecko 429", retry_after=60)
+        with self.assertRaises(ProviderError) as ctx:
+            self.feed.fetch()
+        self.assertNotIsInstance(ctx.exception, RateLimitError)   # the app retries soon
+        self.now += 30
+        with self.assertRaises(ProviderError):
+            self.feed.fetch()
+        self.assertEqual((self.primary.calls, self.secondary.calls), (2, 1))  # 429 respected
+
+    def test_only_rate_limits_left_reports_a_rate_limit(self):
+        self.primary.error = RateLimitError("coincap 429", retry_after=120)
         self.secondary.error = RateLimitError("coingecko 429", retry_after=60)
         with self.assertRaises(RateLimitError) as ctx:
             self.feed.fetch()
@@ -109,7 +120,7 @@ class TestLongerChains(unittest.TestCase):
         snap = self.feed.fetch()
         self.assertEqual(snap.provider_name, "coinlore.com (coincap.io, coingecko.com unavailable)")
 
-    def test_last_feed_is_never_rested(self):
+    def test_after_a_total_failure_every_feed_is_retried(self):
         for feed in (self.a, self.b, self.c):
             feed.error = ProviderError("down")
         with self.assertRaises(ProviderError):
@@ -118,7 +129,54 @@ class TestLongerChains(unittest.TestCase):
         self.now += 30                      # the app's 30 s error retry
         self.assertEqual(self.feed.fetch().provider_name,
                          "coinlore.com (coincap.io, coingecko.com unavailable)")
-        self.assertEqual((self.a.calls, self.b.calls, self.c.calls), (1, 1, 2))
+        self.assertEqual((self.a.calls, self.b.calls, self.c.calls), (2, 2, 2))
+
+    def test_last_feed_never_rests_after_an_ordinary_error(self):
+        self.a.error = ProviderError("down")
+        self.b.error = None
+        self.feed.fetch()                   # a rests (b answered)
+        self.b.error = ProviderError("down")
+        self.c.error = ProviderError("down")
+        with self.assertRaises(ProviderError):
+            self.feed.fetch()
+        self.c.error = None
+        self.now += 30
+        self.assertEqual(self.feed.fetch().provider_name,
+                         "coinlore.com (coincap.io, coingecko.com unavailable)")
+
+    def test_network_blip_does_not_strand_the_chain_on_its_fallback(self):
+        for feed in (self.a, self.b, self.c):
+            feed.error = ProviderError("can't reach host — check your connection")
+        with self.assertRaises(ProviderError):
+            self.feed.fetch()                       # everything failed: likely us, not them
+        for feed in (self.a, self.b, self.c):
+            feed.error = None
+        self.now += 30
+        self.assertEqual(self.feed.fetch().provider_name, "coincap.io")
+
+    def test_all_rate_limited_backs_off_until_the_earliest_window(self):
+        self.a.error = RateLimitError("a 429", retry_after=100)
+        self.b.error = RateLimitError("b 429", retry_after=50)
+        self.c.error = RateLimitError("c 429", retry_after=1800)
+        with self.assertRaises(RateLimitError) as ctx:
+            self.feed.fetch()
+        self.assertEqual(ctx.exception.retry_after, 50)
+
+    def test_mixed_failures_are_a_plain_error(self):
+        self.a.error = ProviderError("401")
+        self.b.error = ProviderError("503")
+        self.c.error = RateLimitError("c 429", retry_after=1800)
+        with self.assertRaises(ProviderError) as ctx:
+            self.feed.fetch()
+        self.assertNotIsInstance(ctx.exception, RateLimitError)   # app retries in 30 s
+
+    def test_unexpected_exception_falls_back_and_rests_the_feed(self):
+        self.a.error = KeyError("price")             # a provider bug, not a ProviderError
+        snap = self.feed.fetch()
+        self.assertEqual(snap.provider_name, "coingecko.com (coincap.io unavailable)")
+        self.now += 60
+        self.feed.fetch()
+        self.assertEqual(self.a.calls, 1)            # rested like any failed feed
 
     def test_needs_two_feeds(self):
         with self.assertRaises(ValueError):

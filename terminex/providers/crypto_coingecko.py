@@ -31,8 +31,10 @@ class CryptoCoinGecko(Provider):
     asset_class = "crypto"
     min_poll_interval: float = 60.0
 
-    def __init__(self, limit: int = 25) -> None:
+    def __init__(self, limit: int = 25, key_hint: bool = True) -> None:
         self.limit = limit
+        # Suggest a CoinCap key on rate limits only when none is set.
+        self.key_hint = key_hint
 
     def fetch(self) -> Snapshot:
         try:
@@ -55,9 +57,13 @@ class CryptoCoinGecko(Provider):
 
         if resp.status_code == 429:
             retry_after = parse_retry_after(resp.headers.get("Retry-After"), 60.0)
+            hint = (
+                " Set TERMINEX_COINCAP_KEY for a more reliable crypto feed."
+                if self.key_hint
+                else ""
+            )
             raise RateLimitError(
-                "CoinGecko rate limited this connection. "
-                "Set TERMINEX_COINCAP_KEY for a more reliable crypto feed.",
+                f"{self.name} rate limited this connection.{hint}",
                 retry_after=retry_after,
             )
 

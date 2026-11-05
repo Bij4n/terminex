@@ -1,10 +1,12 @@
 """A provider that serves from the first healthy feed in an ordered chain.
 
 Crypto uses CoinGecko → CoinLore (CoinCap first when a key is set);
-commodities use Yahoo's query1 host → query2. A feed that fails rests
-until its rate-limit window (Retry-After) or ``FEED_RETRY`` seconds pass,
-so a dead or misconfigured feed isn't hit on every poll. The last feed
-never rests: the app's own retry schedule decides when it is asked again.
+commodities use Yahoo's query1 host → query2. Any rate-limited feed,
+the last included, rests for its Retry-After. A feed that fails otherwise
+rests ``FEED_RETRY`` seconds, but only when a later feed answered in the
+same pass, so the last feed never rests for that: and if every feed fails
+at once the problem is most likely our own connection, so nothing rests
+and the first feed is tried again on the app's next retry.
 ``name`` and ``min_poll_interval`` follow whichever feed is serving, and
 the snapshot's provider name lists the feeds that were skipped.
 """
@@ -39,10 +41,10 @@ class FallbackProvider(Provider):
 
     def fetch(self) -> Snapshot:
         now = time.monotonic()
-        last = len(self.providers) - 1
         errors: list[ProviderError] = []
+        plain_failures: list[int] = []
         for i, provider in enumerate(self.providers):
-            if i < last and now < self._rest_until[i]:
+            if now < self._rest_until[i]:
                 continue
             try:
                 snapshot = provider.fetch()
@@ -52,16 +54,39 @@ class FallbackProvider(Provider):
                 continue
             except ProviderError as exc:
                 errors.append(exc)
-                self._rest_until[i] = now + FEED_RETRY
+                plain_failures.append(i)
                 continue
+            except Exception as exc:  # a provider bug: treat like any failure
+                errors.append(ProviderError(
+                    f"{provider.name} sent something terminex couldn't read "
+                    f"({type(exc).__name__}: {exc})"
+                ))
+                plain_failures.append(i)
+                continue
+            # A later feed answered, so the network is fine and the earlier
+            # failures are the feeds' own: rest them.
+            for j in plain_failures:
+                self._rest_until[j] = now + FEED_RETRY
             self._active = provider
             if i == 0:
                 return snapshot
             skipped = ", ".join(p.name for p in self.providers[:i])
             return replace(snapshot, provider_name=f"{provider.name} ({skipped} unavailable)")
 
+        if not errors:
+            # Every feed is resting (rate limits): wait for the first.
+            retry_after = max(1.0, min(self._rest_until) - now)
+            raise RateLimitError(
+                "every feed is rate limited — waiting for the first to free up",
+                retry_after=retry_after,
+            )
         message = "; ".join(str(e) for e in errors)
-        final = errors[-1]
-        if isinstance(final, RateLimitError):
-            raise RateLimitError(message, retry_after=final.retry_after) from final
-        raise ProviderError(message) from final
+        if plain_failures:
+            # Every feed failed in the same pass: most likely our own
+            # connection. Rest nothing, so the first feed is tried again
+            # as soon as the app retries.
+            raise ProviderError(message) from errors[-1]
+        # Every feed is rate limited or resting: wait for the first one to
+        # become available again, not for the last one's window.
+        retry_after = max(1.0, min(t - now for t in self._rest_until if t > now))
+        raise RateLimitError(message, retry_after=retry_after) from errors[-1]

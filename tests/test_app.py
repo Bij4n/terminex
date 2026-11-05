@@ -393,6 +393,47 @@ class TestHelpAt80x24(AppTestCase):
 
 
 
+class TestFallbackChainInTheApp(AppTestCase):
+    """A FallbackProvider driven through the app's refresh and backoff."""
+
+    def setUp(self):
+        super().setUp()
+        from terminex.providers.fallback import FallbackProvider
+        self.clock = Clock()
+        for target in ("terminex.app.time.monotonic", "terminex.providers.fallback.time.monotonic"):
+            patcher = mock.patch(target, self.clock)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.gecko = FakeProvider(floor=60.0)
+        self.gecko.name = "coingecko.com"
+        self.lore = FakeProvider(floor=60.0)
+        self.lore.name = "coinlore.com"
+        self.app.tabs["crypto"].provider = FallbackProvider(self.gecko, self.lore)
+
+    def test_rate_limited_last_feed_does_not_freeze_the_tab(self):
+        self.gecko.error = ProviderError("coingecko.com returned HTTP 503")
+        self.lore.error = RateLimitError("coinlore.com rate limited", retry_after=1800)
+        self.app._refresh("crypto")
+        self.clock.now += 30
+        self.assertTrue(self.app._needs_refresh("crypto"))   # not frozen for 1800 s
+
+    def test_backoff_toast_does_not_blame_the_wrong_feed(self):
+        self.gecko.error = RateLimitError("coingecko.com rate limited", retry_after=100)
+        self.lore.error = RateLimitError("coinlore.com rate limited", retry_after=200)
+        self.app._refresh("crypto")
+        self.app._handle_key("r")
+        # The serving feed's name isn't necessarily the one that is limited.
+        self.assertRegex(self.app._active_toast(), r"^Rate limited — retrying in \d+s$")
+
+    def test_delta_column_resets_when_the_serving_feed_changes(self):
+        self.app._refresh("crypto")                          # served by CoinGecko
+        self.gecko.error = ProviderError("down")
+        self.lore.quotes = [Quote("BTC", "Bitcoin", 80100.0, "USD", 1.0)]
+        self.clock.now += 60
+        self.app._refresh("crypto")                          # now CoinLore
+        self.assertIsNone(self.app.tabs["crypto"].previous_rates)
+
+
 class TestWatchlistKeepsPolling(AppTestCase):
     """Staying on the watchlist must keep its pinned feeds fresh."""
 

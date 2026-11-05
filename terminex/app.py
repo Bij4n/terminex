@@ -160,7 +160,10 @@ def default_providers(config: Config) -> dict[str, Provider]:
     """The data source for each source tab, chosen from the config."""
     # Crypto: the keyless CoinGecko public API, with keyless CoinLore behind
     # it. CoinCap needs a key; with one it leads the chain.
-    crypto_chain: list[Provider] = [CryptoCoinGecko(), CryptoCoinLore()]
+    crypto_chain: list[Provider] = [
+        CryptoCoinGecko(key_hint=not config.coincap_api_key),
+        CryptoCoinLore(),
+    ]
     if config.coincap_api_key:
         crypto_chain.insert(0, CryptoCoinCap(api_key=config.coincap_api_key))
     # Commodities: Yahoo serves the same API from two hosts.
@@ -411,9 +414,14 @@ class App:
                 f"({type(exc).__name__}: {exc})"
             )
             return
-        # rotate previous → current
-        if state.last_snapshot is not None:
+        # rotate previous → current; after a switch to another feed the
+        # difference would be between feeds, not a market move
+        if state.last_snapshot is not None and (
+            state.last_snapshot.provider_name == snap.provider_name
+        ):
             state.previous_rates = state.last_snapshot.as_rate_map()
+        else:
+            state.previous_rates = None
         state.last_snapshot = snap
         state.last_error = None
         # Append prices to per-symbol series (source tabs only — the
@@ -465,10 +473,9 @@ class App:
         now = time.monotonic()
         if now < state.backoff_until:
             wait = state.backoff_until - now
-            self._set_toast(
-                f"{provider.name} is rate limited — retrying in {wait:.0f}s",
-                seconds=3.0,
-            )
+            # Don't name a feed: in a fallback chain the serving feed's name
+            # isn't necessarily the one that is limited (the error says).
+            self._set_toast(f"Rate limited — retrying in {wait:.0f}s", seconds=3.0)
             return
         # After an error, retry at once. After a success, a provider with a
         # poll floor has nothing newer to give until the floor has passed.
