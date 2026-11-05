@@ -68,8 +68,12 @@ independent code review.
 - Switching tabs and pressing `r` bypassed rate-limit backoff.
 - A corrupt `watchlist.toml` was silently overwritten; it is now backed up to
   `watchlist.toml.bak`.
+- Watchlist prices stopped updating while you stayed on that tab, and a
+  feed that failed once stayed unavailable there.
 - Pins from a failed feed said "loading…" forever, and the converter
   answered "unknown symbol" when a feed wasn't loaded.
+- Very small USD prices on the watchlist (one Indonesian rupiah is about
+  $0.00006) showed a single significant digit.
 - Two terminex windows on the same database both fired the same alert, and
   recurring alerts re-fired on every restart while their condition held.
 - Alert fire times were shown as UTC dates.
