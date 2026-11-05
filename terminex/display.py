@@ -90,7 +90,11 @@ def _format_price(value: float, asset: str = "fx") -> str:
         return f"{value:.{decimals}f}"
     if value >= 1:
         return f"{value:.4f}"
-    return f"{value:.5f}"
+    if value <= 0:
+        return f"{0:.5f}"
+    # At least 4 significant digits: 1 IDR is about $0.0000613.
+    decimals = min(10, max(5, 3 - math.floor(math.log10(value))))
+    return f"{value:.{decimals}f}"
 
 
 # Changes that would print as "+0.00%" / "-0.00%" are shown as no change.
@@ -253,7 +257,10 @@ def build_table(
         )
         row: list = [pointer, star]
         if show_rank:
-            rank = q.meta.get("rank") or (ranks or {}).get(q.symbol) or i + 1
+            # The watchlist numbers its own rows; other tabs keep the
+            # provider's rank, else the row's position before sorting.
+            provider_rank = None if is_watchlist else q.meta.get("rank")
+            rank = provider_rank or (ranks or {}).get(q.symbol) or i + 1
             row.append(str(rank))
         if is_watchlist:
             row.append(q.meta.get("source_label", "?"))

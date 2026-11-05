@@ -29,6 +29,12 @@ class TestFormatPrice(unittest.TestCase):
         self.assertEqual(_format_price(0.889912, "fx"), "0.88991")
         self.assertEqual(_format_price(18132.17, "fx"), "18,132.17")
 
+    def test_tiny_values_keep_four_significant_digits(self):
+        # Watchlist FX pins are USD per unit: 1 IDR is about $0.0000613.
+        self.assertEqual(_format_price(0.0000613, "fx"), "0.00006130")
+        self.assertEqual(_format_price(0.000746, "fx"), "0.0007460")
+        self.assertEqual(_format_price(0.18470, "commodity"), "0.18470")
+
     def test_commodities_keep_four_decimals(self):
         self.assertEqual(_format_price(6.0075, "commodity"), "6.0075")
 
@@ -55,6 +61,19 @@ class TestRankColumn(unittest.TestCase):
         out = _render(build_table(snap, ranks={"EUR": 2, "JPY": 3}))
         self.assertEqual(re.findall(r"│\s+(\d+) │ (JPY|EUR)", out), [("3", "JPY"), ("2", "EUR")])
 
+
+
+class TestWatchlistRankColumn(unittest.TestCase):
+    def test_watchlist_numbers_rows_by_pin_order(self):
+        quotes = [
+            Quote("EUR", "Euro", 1.12, "USD", meta={"source_tab": "fx", "source_label": "FX"}),
+            Quote("BTC", "Bitcoin", 80000.0, "USD", meta={"source_tab": "crypto", "source_label": "Crypto", "rank": 1}),
+            Quote("GC.F", "Gold", 4150.0, "USD", meta={"source_tab": "commodity", "source_label": "Cmdty"}),
+        ]
+        snap = Snapshot("fx", "USD", quotes, datetime.now(tz=timezone.utc))
+        out = _render(build_table(snap, is_watchlist=True, ranks={"EUR": 1, "BTC": 2, "GC.F": 3}))
+        self.assertEqual(re.findall(r"│\s+(\d) │ \w+\s+│ (EUR|BTC|GC\.F)", out),
+                         [("1", "EUR"), ("2", "BTC"), ("3", "GC.F")])
 
 
 class TestWatchlistTrendSource(unittest.TestCase):
