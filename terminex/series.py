@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 
 DEFAULT_MAXLEN = 20
 
+# Series key for FX in USD per unit (the FX tab's own series are units per
+# base currency). Recorded by the app at each FX snapshot; watchlist FX
+# pins draw their trend from it.
+FX_USD = "fx_usd"
+
 
 class SeriesStore:
     def __init__(
@@ -50,6 +55,10 @@ class SeriesStore:
         if buf is None:
             buf = deque(maxlen=self.maxlen)
             self._buffers[key] = buf
+        if buf and buf[-1] == price:
+            # Unchanged price: no new information, and repeats made the
+            # trend line draw as a staircase.
+            return
         buf.append(price)
         if _persist and self._db is not None:
             self._db.execute(

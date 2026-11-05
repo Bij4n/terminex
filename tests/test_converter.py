@@ -97,6 +97,34 @@ class TestBuildUsdLookup(unittest.TestCase):
         self.assertEqual(build_usd_lookup(snaps), {})
 
 
+class TestNonUsdBase(unittest.TestCase):
+    """FX snapshots quoted per 1 EUR must still resolve to USD per unit."""
+
+    def setUp(self):
+        # Rates per 1 EUR, consistent with USD-base EUR=0.889912, GBP=0.742316.
+        self.fx = _snap("fx", "EUR", [
+            ("EUR", 1.0), ("USD", 1.1237), ("GBP", 0.834147),
+        ])
+        self.crypto = _snap("crypto", "USD", [("BTC", 80000.0)])
+        self.lookup = build_usd_lookup({"fx": self.fx, "crypto": self.crypto})
+
+    def test_usd_is_one(self):
+        self.assertAlmostEqual(self.lookup["USD"], 1.0, places=9)
+
+    def test_eur_is_usd_per_euro(self):
+        self.assertAlmostEqual(self.lookup["EUR"], 1.1237, places=4)
+
+    def test_crypto_to_fx_cross(self):
+        result = convert(parse_query("1 BTC in GBP"), self.lookup)
+        # 80000 USD x 0.742316 GBP/USD
+        self.assertAlmostEqual(result.result, 59385.3, delta=1.0)
+
+    def test_base_without_usd_row_is_skipped(self):
+        fx = _snap("fx", "EUR", [("EUR", 1.0), ("GBP", 0.834147)])
+        lookup = build_usd_lookup({"fx": fx})
+        self.assertNotIn("GBP", lookup)
+
+
 class TestConvert(unittest.TestCase):
     def setUp(self):
         self.lookup = {"USD": 1.0, "EUR": 1.25, "JPY": 0.00625, "BTC": 65000.0}

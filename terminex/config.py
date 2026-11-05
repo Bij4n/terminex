@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -42,22 +43,86 @@ def load(path: Path | None = None) -> Config:
         )
         return _with_env(Config())
 
-    providers = data.get("providers") or {}
-    crypto = providers.get("crypto") or {}
-
     cfg = Config(
-        base_currency=str(data.get("base_currency", "USD")).upper(),
-        refresh_interval=float(data.get("refresh_interval", 10.0)),
-        active_tab=str(data.get("active_tab", "fx")).lower(),
-        coincap_api_key=str(crypto.get("api_key", "")),
+        base_currency=_value(
+            data, "base_currency", "USD", parse_currency_code, p
+        ),
+        refresh_interval=_value(
+            data, "refresh_interval", 10.0, parse_interval, p
+        ),
+        active_tab=_value(data, "active_tab", "fx", _parse_tab, p),
+        coincap_api_key=_coincap_key(data, p),
     )
     return _with_env(cfg)
+
+
+VALID_TABS = ("fx", "crypto", "commodity", "watchlist")
+
+
+def parse_currency_code(value: object) -> str:
+    """Return an upper-case three-letter code, or raise ValueError."""
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z]{3}", value):
+        raise ValueError("expected a three-letter currency code like USD")
+    return value.upper()
+
+
+def parse_interval(value: object) -> float:
+    """Return a positive number of seconds, or raise ValueError."""
+    if isinstance(value, bool):
+        raise ValueError("expected a number of seconds")
+    try:
+        seconds = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError("expected a number of seconds") from None
+    if not seconds > 0 or seconds == float("inf"):
+        raise ValueError("expected a positive number of seconds")
+    return seconds
+
+
+def _parse_tab(value: object) -> str:
+    if not isinstance(value, str) or value.lower() not in VALID_TABS:
+        raise ValueError(f"expected one of {', '.join(VALID_TABS)}")
+    return value.lower()
+
+
+def _warn(path: Path, key: str, value: object, reason: str, default: object) -> None:
+    print(
+        f"terminex: ignoring {key} = {value!r} in {path} ({reason}); "
+        f"using {default!r}",
+        file=sys.stderr,
+    )
+
+
+def _value(data: dict, key: str, default, parse, path: Path):
+    if key not in data:
+        return default
+    try:
+        return parse(data[key])
+    except ValueError as exc:
+        _warn(path, key, data[key], str(exc), default)
+        return default
+
+
+def _coincap_key(data: dict, path: Path) -> str:
+    providers = data.get("providers", {})
+    if not isinstance(providers, dict):
+        _warn(path, "providers", providers, "expected a table", {})
+        return ""
+    crypto = providers.get("crypto", {})
+    if not isinstance(crypto, dict):
+        _warn(path, "providers.crypto", crypto, "expected a table", {})
+        return ""
+    key = crypto.get("api_key", "")
+    if not isinstance(key, str):
+        _warn(path, "providers.crypto.api_key", key, "expected a string", "")
+        return ""
+    return key
 
 
 def _with_env(cfg: Config) -> Config:
     """Environment variables override file values."""
     key = os.environ.get("TERMINEX_COINCAP_KEY")
-    if key and not cfg.coincap_api_key:
+    if key:
         cfg = Config(
             base_currency=cfg.base_currency,
             refresh_interval=cfg.refresh_interval,

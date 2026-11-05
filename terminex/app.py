@@ -3,30 +3,38 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 from rich.console import Console, Group
 from rich.live import Live
 from rich.text import Text
 
-from .config import Config, load as load_config
-from .display import build_table, state_panel
+from .config import (
+    Config,
+    load as load_config,
+    parse_currency_code,
+    parse_interval,
+)
+from .display import build_table, fit_hidden, scroll_offset, state_panel
 from .help import render_filter_bar, render_help_panel
 from .keyboard import KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, KeyboardListener
 from .statusbar import render_status_bar
 from .providers.base import Provider, ProviderError, RateLimitError
-from .providers.commodities_stooq import CommoditiesStooq
+from .providers.commodities_yahoo import CommoditiesYahoo
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.crypto_coingecko import CryptoCoinGecko
 from .providers.fx_erapi import FxERApi
 from .alert_engine import AlertEngine, FireEvent
 from .providers.watchlist_agg import WatchlistAggregator
 from .quote import AssetClass, Quote, Snapshot
-from .series import SeriesStore
-from .store import connect as connect_store
-from .watchlist import Pin, load as load_watchlist, save as save_watchlist
+from .series import FX_USD, SeriesStore
+from .store import open_store
+from .watchlist import load as load_watchlist, save as save_watchlist
 
 SORT_KEYS = ["default", "24h", "price"]
 
@@ -64,6 +72,38 @@ def _format_sort_indicator(key: str, desc: bool) -> str:
     arrow = "↓" if desc else "↑"
     return f"sort: {key} {arrow}"
 
+_EXIT_SIGNALS = tuple(
+    sig
+    for sig in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None))
+    if sig is not None
+)
+
+
+@contextmanager
+def _exit_on_signals(signals: tuple[int, ...] = _EXIT_SIGNALS) -> Iterator[None]:
+    """Turn SIGTERM/SIGHUP into ``SystemExit`` while the dashboard runs.
+
+    Without this, ``kill``, ``timeout`` or closing the terminal tab ends
+    the process before ``Live`` and the keyboard listener can restore the
+    cursor and terminal mode.
+    """
+
+    def _handler(signum: int, _frame) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = {}
+    for sig in signals:
+        try:
+            previous[sig] = signal.signal(sig, _handler)
+        except (ValueError, OSError):  # not the main thread
+            pass
+    try:
+        yield
+    finally:
+        for sig, old in previous.items():
+            signal.signal(sig, old)
+
+
 TAB_KEYS = {"1": "fx", "2": "crypto", "3": "commodity", "4": "watchlist"}
 TAB_ORDER = ["fx", "crypto", "commodity", "watchlist"]
 TAB_LABELS = {
@@ -73,6 +113,14 @@ TAB_LABELS = {
     "watchlist": "Watch",
 }
 SOURCE_TABS: list[str] = ["fx", "crypto", "commodity"]
+_FEED_NAMES = {"fx": "FX", "crypto": "crypto", "commodity": "commodity"}
+
+
+def _join_names(names: list[str]) -> str:
+    """["FX", "crypto", "commodity"] → "FX, crypto and commodity"."""
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
 # Map tab name → AssetClass for watchlist pins
 TAB_TO_ASSET_CLASS = {"fx": "fx", "crypto": "crypto", "commodity": "commodity"}
 
@@ -89,6 +137,7 @@ class TabState:
     sort_desc: bool = True
     filter_query: str = ""
     backoff_until: float = 0.0  # monotonic timestamp; skip fetch if now < this
+    scroll_offset: int = 0  # first row shown when the table is taller than the terminal
 
     def clamp_selection(self, visible_count: int | None = None) -> None:
         if visible_count is None:
@@ -122,11 +171,16 @@ class App:
         self.tabs: dict[str, TabState] = {
             "fx": TabState(FxERApi(base=config.base_currency)),
             "crypto": TabState(crypto_provider),
-            "commodity": TabState(CommoditiesStooq()),
+            "commodity": TabState(CommoditiesYahoo()),
         }
         self.watchlist = load_watchlist()
         self.tabs["watchlist"] = TabState(
-            WatchlistAggregator(self.watchlist, self._lookup_pinned_quote)
+            WatchlistAggregator(
+                self.watchlist,
+                self._lookup_pinned_quote,
+                fx_usd_price=self._fx_usd_price,
+                source_failed=self._source_failed,
+            )
         )
         self.console = Console()
         self.should_quit = False
@@ -139,10 +193,13 @@ class App:
         self.converter_error: str | None = None
         self.alert_draft: dict | None = None  # active alert-creation modal state
         self.alert_list_delete_buffer: str = ""
-        self.store = connect_store()
+        self.store, store_notices = open_store()
+        for notice in store_notices:
+            print(f"terminex: {notice}", file=sys.stderr)
         self.alert_engine = AlertEngine(self.store)
         self.series = SeriesStore(db=self.store)
         self.show_sparklines = False
+        self.evaluate_alerts = True  # off for --once: a print, not a watch
         self._last_age: str = ""
 
     def _lookup_pinned_quote(
@@ -155,6 +212,43 @@ class App:
             if q.symbol == symbol:
                 return q
         return None
+
+    def _alert_base(self, asset_class: str) -> str:
+        """Base currency an alert's threshold is quoted in."""
+        if asset_class == "fx":
+            return getattr(self.tabs["fx"].provider, "base", "USD")
+        return "USD"
+
+    def _alert_unit(self, asset_class: str, symbol: str, quote: Quote) -> str:
+        """Units the alert threshold is in (alerts compare source-tab prices).
+
+        FX alerts are on the FX tab's rate, which is "units per 1 base" —
+        not the USD price the watchlist shows — so say so in the modal.
+        """
+        if asset_class == "fx":
+            return f"{symbol} per 1 {self._alert_base('fx')}"
+        unit = quote.meta.get("unit")
+        return f"USD/{unit}" if unit else "USD"
+
+    def _source_failed(self, tab_name: str) -> bool:
+        state = self.tabs[tab_name]
+        return state.last_snapshot is None and state.last_error is not None
+
+    def _retry_hint(self, state: TabState) -> str:
+        """When the next automatic attempt will happen, for error messages."""
+        now = time.monotonic()
+        if now < state.backoff_until:
+            wait = state.backoff_until - now
+        else:
+            wait = self._poll_interval(state) - (now - state.last_fetch_attempt)
+        return "retrying now" if wait < 1 else f"retrying in {wait:.0f}s"
+
+    def _fx_usd_price(self, code: str) -> float | None:
+        from .converter import fx_usd_per_unit
+        snap = self.tabs["fx"].last_snapshot
+        if snap is None:
+            return None
+        return fx_usd_per_unit(snap).get(code.upper())
 
     def _handle_alert_fires(self, fires: list[FireEvent]) -> None:
         import subprocess
@@ -211,6 +305,8 @@ class App:
             else None
         )
         current = format_age(fetched_at)
+        if state.last_error is not None:
+            current += "|" + self._retry_hint(state)  # keep the countdown live
         if current != self._last_age:
             self._last_age = current
             return True
@@ -262,15 +358,19 @@ class App:
     # ---- fetch / tab machinery ----
 
     def _refresh(self, tab_name: str) -> None:
-        # Watchlist reads from source tabs' already-fetched data.
-        # Ensure each source tab has at least attempted a fetch.
+        # The watchlist reads the source tabs' snapshots, so while it is open
+        # it keeps the feeds that have pins fresh on their own schedules.
         if tab_name == "watchlist":
-            for src in SOURCE_TABS:
-                src_state = self.tabs[src]
-                if src_state.last_snapshot is None and src_state.last_error is None:
+            for src in self._pinned_sources():
+                if self._needs_refresh(src):
                     self._refresh(src)
         state = self.tabs[tab_name]
-        state.last_fetch_attempt = time.monotonic()
+        now = time.monotonic()
+        if now < state.backoff_until:
+            # Every path (schedule, tab switch, `r`) goes through here, so
+            # nothing can send a request while a provider is backing off.
+            return
+        state.last_fetch_attempt = now
         try:
             snap = state.provider.fetch()
         except RateLimitError as exc:
@@ -279,6 +379,12 @@ class App:
             return
         except ProviderError as exc:
             state.last_error = str(exc)
+            return
+        except Exception as exc:  # a provider bug must not take down the app
+            state.last_error = (
+                f"{state.provider.name} sent something terminex couldn't read "
+                f"({type(exc).__name__}: {exc})"
+            )
             return
         # rotate previous → current
         if state.last_snapshot is not None:
@@ -289,9 +395,16 @@ class App:
         # watchlist is a derived view and would double-count).
         if tab_name in SOURCE_TABS:
             self.series.extend_from_snapshot(tab_name, snap.quotes)
-            fires = self.alert_engine.evaluate(snap, tab_name)
-            if fires:
-                self._handle_alert_fires(fires)
+            if tab_name == "fx":
+                # USD per unit at this snapshot's own pivot, for watchlist
+                # trends (the FX tab's series is units per base currency).
+                from .converter import fx_usd_per_unit
+                for code, usd in fx_usd_per_unit(snap).items():
+                    self.series.append(FX_USD, code, usd)
+            if self.evaluate_alerts:
+                fires = self.alert_engine.evaluate(snap, tab_name)
+                if fires:
+                    self._handle_alert_fires(fires)
         # A source-tab refresh invalidates any existing watchlist snapshot.
         if (
             tab_name in SOURCE_TABS
@@ -300,6 +413,51 @@ class App:
         ):
             self.tabs["watchlist"].last_fetch_attempt = 0.0
 
+    def _pinned_sources(self) -> list[str]:
+        pinned = {p.asset_class for p in self.watchlist.pins}
+        return [src for src in SOURCE_TABS if src in pinned]
+
+    def _poll(self) -> bool:
+        """One scheduling step of the main loop; True if anything changed."""
+        if self._needs_refresh(self.active_tab):
+            self._refresh(self.active_tab)
+            return True
+        return False
+
+    def _manual_refresh(self, tab_name: str) -> None:
+        """`r`: refresh now unless the provider can't give anything new yet."""
+        if tab_name == "watchlist":
+            # Retry any pinned feed that failed, then recompose the rows.
+            now = time.monotonic()
+            for src in self._pinned_sources():
+                src_state = self.tabs[src]
+                if src_state.last_error is not None and now >= src_state.backoff_until:
+                    self._refresh(src)
+            self._refresh("watchlist")
+            return
+        state = self.tabs[tab_name]
+        provider = state.provider
+        now = time.monotonic()
+        if now < state.backoff_until:
+            wait = state.backoff_until - now
+            self._set_toast(
+                f"{provider.name} is rate limited — retrying in {wait:.0f}s",
+                seconds=3.0,
+            )
+            return
+        # After an error, retry at once. After a success, a provider with a
+        # poll floor has nothing newer to give until the floor has passed.
+        if state.last_error is None and state.last_snapshot is not None:
+            wait = provider.min_poll_interval - (now - state.last_fetch_attempt)
+            if wait > 0:
+                self._set_toast(
+                    f"{provider.name} updates every "
+                    f"{provider.min_poll_interval:.0f}s — next refresh in {wait:.0f}s",
+                    seconds=3.0,
+                )
+                return
+        self._refresh(tab_name)
+
     def _needs_refresh(self, tab_name: str) -> bool:
         state = self.tabs[tab_name]
         now = time.monotonic()
@@ -307,10 +465,18 @@ class App:
             return False
         if state.last_snapshot is None and state.last_error is None:
             return True
-        effective_interval = max(
-            self.interval, state.provider.min_poll_interval
-        )
-        return (now - state.last_fetch_attempt) >= effective_interval
+        return (now - state.last_fetch_attempt) >= self._poll_interval(state)
+
+    # A failed fetch (offline, timeout, 5xx) is retried at least this often,
+    # even for feeds whose normal floor is minutes long. Rate limits are
+    # handled separately by backoff_until.
+    _ERROR_RETRY = 30.0
+
+    def _poll_interval(self, state: TabState) -> float:
+        interval = max(self.interval, state.provider.min_poll_interval)
+        if state.last_error is not None:
+            interval = min(interval, max(self.interval, self._ERROR_RETRY))
+        return interval
 
     # ---- rendering ----
 
@@ -332,6 +498,47 @@ class App:
     def _render(self):
         state = self.tabs[self.active_tab]
         header = self._header()
+        # Overlays and modals replace the table: return before building it.
+        if self.show_help:
+            return Group(header, Text(""), render_help_panel(self.console.width))
+
+        if self.input_mode == "converter":
+            from .converter import render_converter_panel
+            return Group(
+                header,
+                Text(""),
+                render_converter_panel(
+                    self.converter_buffer,
+                    self.converter_history,
+                    self.converter_error,
+                ),
+            )
+
+        if self.input_mode == "alert_new" and self.alert_draft is not None:
+            from .alerts_ui import render_alert_new_panel
+            return Group(
+                header,
+                Text(""),
+                render_alert_new_panel(self.alert_draft),
+            )
+
+        if self.input_mode == "alert_list":
+            from . import alerts as alerts_dao
+            from .alerts_ui import render_alert_list_panel
+            return Group(
+                header,
+                Text(""),
+                render_alert_list_panel(
+                    alerts_dao.list_all(self.store),
+                    delete_buffer=self.alert_list_delete_buffer,
+                ),
+            )
+
+        status_line = self._build_status_line(state)
+        # Header and status line wrap on narrow terminals: measure them.
+        chrome_lines = (
+            self._line_count(header) + self._line_count(status_line) + 2
+        )
 
         is_watchlist_tab = self.active_tab == "watchlist"
         empty_watchlist = is_watchlist_tab and not self.watchlist.pins
@@ -368,65 +575,90 @@ class App:
                 pinned_set = {
                     (p.asset_class, p.symbol) for p in self.watchlist.pins
                 }
+                # "#" keeps each row's original position when sorted/filtered.
+                ranks = {
+                    q.symbol: i
+                    for i, q in enumerate(state.last_snapshot.quotes, start=1)
+                }
                 current_tab_asset = TAB_TO_ASSET_CLASS.get(self.active_tab)
-                body = build_table(
-                    display_snap,
-                    state.previous_rates,
-                    selected_index=state.selected_index,
-                    sort_indicator=sort_indicator,
-                    pinned_set=pinned_set,
-                    current_tab_asset=current_tab_asset,
-                    is_watchlist=is_watchlist_tab,
-                    series_getter=(
-                        self.series.get if self.show_sparklines else None
-                    ),
+
+                def build(hidden, rows=None):
+                    return build_table(
+                        display_snap,
+                        state.previous_rates,
+                        selected_index=state.selected_index,
+                        sort_indicator=sort_indicator,
+                        pinned_set=pinned_set,
+                        current_tab_asset=current_tab_asset,
+                        is_watchlist=is_watchlist_tab,
+                        series_getter=(
+                            self.series.get if self.show_sparklines else None
+                        ),
+                        hidden=hidden,
+                        rows=rows,
+                        ranks=ranks,
+                    )
+
+                body = self._fit_to_terminal(
+                    build, state, len(sorted_quotes), chrome_lines
                 )
         elif state.last_error is not None:
             body = state_panel(
-                state.last_error,
+                f"{state.last_error}\n{self._retry_hint(state)}",
                 title=f"{TAB_LABELS[self.active_tab]} fetch error",
                 variant="error",
             )
         else:
             body = state_panel("loading…", variant="neutral")
 
-        if self.show_help:
-            return Group(header, Text(""), render_help_panel())
-
-        if self.input_mode == "converter":
-            from .converter import render_converter_panel
-            return Group(
-                header,
-                Text(""),
-                render_converter_panel(
-                    self.converter_buffer,
-                    self.converter_history,
-                    self.converter_error,
-                ),
-            )
-
-        if self.input_mode == "alert_new" and self.alert_draft is not None:
-            from .alerts_ui import render_alert_new_panel
-            return Group(
-                header,
-                Text(""),
-                render_alert_new_panel(self.alert_draft),
-            )
-
-        if self.input_mode == "alert_list":
-            from . import alerts as alerts_dao
-            from .alerts_ui import render_alert_list_panel
-            return Group(
-                header,
-                Text(""),
-                render_alert_list_panel(
-                    alerts_dao.list_all(self.store),
-                    delete_buffer=self.alert_list_delete_buffer,
-                ),
-            )
-
-        status_line = self._build_status_line(state)
         return Group(header, Text(""), body, Text(""), status_line)
+
+    def _line_count(self, renderable) -> int:
+        console = self.console
+        return len(console.render_lines(renderable, console.options))
+
+    def _too_small(self, need_width: int, need_height: int):
+        from . import theme
+        size = self.console.size
+        return Text(
+            f"Terminal too small for this table ({size.width}×{size.height}). "
+            f"Make it at least {need_width}×{need_height}.",
+            style=theme.WARN,
+        )
+
+    def _fit_to_terminal(self, build, state: TabState, total: int, chrome_lines: int):
+        """Drop columns to fit the width, then window rows to fit the height.
+
+        Rows are one line each (every column is no_wrap), so the number of
+        rows that fit is the line budget minus the table's own chrome. When
+        not even the essential columns or a single row fit, show a message
+        rather than a truncated or cropped table.
+        """
+        console = self.console
+        size = console.size
+        hidden, width = fit_hidden(build, console)
+        table = build(hidden)
+        lines = self._line_count(table)
+        table_chrome = lines - total
+        min_height = chrome_lines + table_chrome + 2  # one row + a scroll caption
+        if width > size.width or (lines > size.height - chrome_lines and size.height < min_height):
+            return self._too_small(max(width, size.width), max(min_height, size.height))
+        budget = size.height - chrome_lines
+        if lines <= budget or total == 0:
+            state.scroll_offset = 0
+            return table
+        visible = max(1, total - (lines - budget))
+        for _ in range(2):  # a scrolled table may gain a caption line
+            state.scroll_offset = scroll_offset(
+                state.selected_index, state.scroll_offset, visible, total
+            )
+            rows = slice(state.scroll_offset, state.scroll_offset + visible)
+            table = build(hidden, rows)
+            excess = self._line_count(table) - budget
+            if excess <= 0 or visible == 1:
+                break
+            visible = max(1, visible - excess)
+        return table
 
     def _build_status_line(self, state: TabState):
         from . import theme
@@ -442,7 +674,8 @@ class App:
             and state.last_snapshot is not None
         ):
             return Text(
-                f" stale — {state.last_error}", style=theme.ERROR
+                f" stale — {state.last_error} · {self._retry_hint(state)}",
+                style=theme.ERROR,
             )
         total = (
             len(state.last_snapshot.quotes)
@@ -495,19 +728,19 @@ class App:
             new_tab = TAB_ORDER[(idx + delta) % len(TAB_ORDER)]
             if new_tab != self.active_tab:
                 self.active_tab = new_tab
-                if self.tabs[new_tab].last_snapshot is None:
+                if self._needs_refresh(new_tab):
                     self._refresh(new_tab)
             return True
         if ch in TAB_KEYS:
             new_tab = TAB_KEYS[ch]
             if new_tab != self.active_tab:
                 self.active_tab = new_tab
-                # trigger an immediate fetch if we've never loaded this tab
-                if self.tabs[new_tab].last_snapshot is None:
+                # fetch now if this tab is due (first visit, or stale)
+                if self._needs_refresh(new_tab):
                     self._refresh(new_tab)
                 return True
         if ch in ("r", "R"):
-            self._refresh(self.active_tab)
+            self._manual_refresh(self.active_tab)
             return True
         state = self.tabs[self.active_tab]
         if ch in ("j", KEY_DOWN):
@@ -577,6 +810,7 @@ class App:
                 "asset_class": asset_class,
                 "symbol": symbol,
                 "current_price": price.price,
+                "unit": self._alert_unit(asset_class, symbol, price),
                 "op": ">",
                 "threshold_buffer": f"{price.price:.4f}".rstrip("0").rstrip("."),
                 "recurring": False,
@@ -643,6 +877,11 @@ class App:
             if threshold <= 0:
                 draft["error"] = "threshold must be positive"
                 return True
+            from .alert_engine import condition_met
+            # Prices keep updating while the modal is open: judge "already
+            # true?" on the latest one.
+            latest = self._lookup_pinned_quote(draft["asset_class"], draft["symbol"])
+            current = latest.price if latest and latest.price > 0 else draft["current_price"]
             alerts_dao.create(
                 self.store,
                 asset_class=draft["asset_class"],
@@ -650,6 +889,9 @@ class App:
                 op=draft["op"],
                 threshold=threshold,
                 recurring=draft["recurring"],
+                # Already true? Wait for a real crossing rather than firing now.
+                armed=not condition_met(draft["op"], threshold, current),
+                base=self._alert_base(draft["asset_class"]),
             )
             self._set_toast(
                 f"alert created: {draft['symbol']} {draft['op']} "
@@ -705,7 +947,19 @@ class App:
             )
             try:
                 result = evaluate(expr, lookup)
-            except (ParseError, ResolveError) as exc:
+            except ResolveError as exc:
+                missing = [
+                    _FEED_NAMES[src]
+                    for src in SOURCE_TABS
+                    if self.tabs[src].last_snapshot is None
+                ]
+                self.converter_error = str(exc)
+                if missing:
+                    self.converter_error += (
+                        f" — {_join_names(missing)} prices aren't loaded"
+                    )
+                return True
+            except ParseError as exc:
                 self.converter_error = str(exc)
                 return True
             self.converter_error = None
@@ -753,21 +1007,74 @@ class App:
     # ---- main loop ----
 
     def run(self) -> int:
+        with _exit_on_signals():
+            return self._run()
+
+    def run_once(self) -> int:
+        """Print the active tab once and exit (``--once``, or piped output).
+
+        Alerts are not evaluated: a cron job calling this every minute
+        would otherwise re-fire every alert whose condition holds.
+        """
+        self.evaluate_alerts = False
+        try:
+            tab = self.active_tab
+            if tab == "watchlist" and not self.watchlist.pins:
+                print("terminex: no symbols pinned", file=sys.stderr)
+                return 1  # before any request: cron jobs shouldn't burn quota
+            self._refresh(tab)
+            state = self.tabs[tab]
+            if state.last_snapshot is None:
+                print(f"terminex: {state.last_error or 'no data'}", file=sys.stderr)
+                return 1
+            snap = replace(
+                state.last_snapshot,
+                quotes=_sort_quotes(
+                    state.last_snapshot.quotes, state.sort_key, state.sort_desc
+                ),
+            )
+            pinned = {(p.asset_class, p.symbol) for p in self.watchlist.pins}
+
+            def build(hidden, rows=None):
+                return build_table(
+                    snap,
+                    pinned_set=pinned,
+                    current_tab_asset=TAB_TO_ASSET_CLASS.get(tab),
+                    is_watchlist=tab == "watchlist",
+                    # one snapshot has no "since last" to compare with
+                    hidden=hidden | {"delta"},
+                )
+
+            hidden, _ = fit_hidden(build, self.console)
+            self.console.print(build(hidden))
+            return 0
+        finally:
+            self.store.close()
+
+    def _run(self) -> int:
         # eager first fetch for the active tab
         self._refresh(self.active_tab)
 
         kb = KeyboardListener()
-        kb.start()
         try:
+            kb.start()
             with Live(
                 self._render(),
                 console=self.console,
                 refresh_per_second=8,
                 screen=False,
             ) as live:
+                size = self.console.size
                 while not self.should_quit:
                     time.sleep(0.1)
                     dirty = False
+                    if self.console.size != size:
+                        # The terminal rewraps old output on resize, which
+                        # leaves fragments above the live area: clear and
+                        # redraw at the new size.
+                        size = self.console.size
+                        self.console.clear()
+                        dirty = True
                     for ch in kb.drain():
                         if self._handle_key(ch):
                             dirty = True
@@ -775,8 +1082,7 @@ class App:
                             break
                     if self.should_quit:
                         break
-                    if self._needs_refresh(self.active_tab):
-                        self._refresh(self.active_tab)
+                    if self._poll():
                         dirty = True
                     # toast expiration forces a redraw
                     if self._toast is not None and self._active_toast() is None:
@@ -797,12 +1103,24 @@ class App:
         return 0
 
 
+def _cli_type(parse):
+    """Adapt a config value parser into an argparse ``type=``."""
+
+    def convert(text: str):
+        try:
+            return parse(text)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from None
+
+    return convert
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     try:
         from importlib.metadata import version as _pkg_version
         _version = _pkg_version("terminex")
     except Exception:
-        _version = "0.4.0"
+        _version = "unknown"
     parser = argparse.ArgumentParser(
         prog="terminex",
         description=(
@@ -813,28 +1131,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {_version}"
     )
-    parser.add_argument("--base", default=None, help="FX base currency")
     parser.add_argument(
-        "--interval", type=float, default=None, help="refresh interval (s)"
+        "--base",
+        type=_cli_type(parse_currency_code),
+        default=None,
+        help="FX base currency, e.g. EUR",
+    )
+    parser.add_argument(
+        "--interval",
+        type=_cli_type(parse_interval),
+        default=None,
+        help="refresh interval in seconds",
     )
     parser.add_argument(
         "--tab",
         choices=TAB_ORDER,
         default=None,
-        help="tab to launch on (fx/crypto/commodity)",
+        help="tab to launch on",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="print the tab once and exit (automatic when output is not a terminal)",
     )
     return parser.parse_args(argv)
+
+
+def _wants_once(args: argparse.Namespace, stdout) -> bool:
+    """One-shot mode: asked for, or output is going to a pipe or file."""
+    return bool(args.once) or not stdout.isatty()
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     config = load_config()
     if args.base:
-        config = replace(config, base_currency=args.base.upper())
+        config = replace(config, base_currency=args.base)
     if args.tab:
         config = replace(config, active_tab=args.tab)
     interval = args.interval if args.interval is not None else config.refresh_interval
     app = App(config=config, interval=interval)
+    if _wants_once(args, sys.stdout):
+        return app.run_once()
     return app.run()
 
 

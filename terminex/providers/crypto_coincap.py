@@ -8,7 +8,14 @@ from datetime import datetime, timezone
 import requests
 
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError, RateLimitError
+from .base import (
+    Provider,
+    ProviderError,
+    describe_request_error,
+    RateLimitError,
+    finite_number,
+    parse_retry_after,
+)
 
 API_URL = "https://rest.coincap.io/v3/assets"
 TIMEOUT = 10.0
@@ -35,12 +42,12 @@ class CryptoCoinCap(Provider):
                 timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise ProviderError(f"request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
 
         if resp.status_code == 429:
-            retry_after = float(resp.headers.get("Retry-After", 60))
+            retry_after = parse_retry_after(resp.headers.get("Retry-After"), 60.0)
             raise RateLimitError(
-                "CoinCap rate limited — retrying automatically.",
+                "CoinCap rate limited this connection.",
                 retry_after=retry_after,
             )
 
@@ -48,33 +55,30 @@ class CryptoCoinCap(Provider):
             resp.raise_for_status()
             payload = resp.json()
         except requests.HTTPError as exc:
-            raise ProviderError(f"request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
         except ValueError as exc:
-            raise ProviderError(f"invalid json: {exc}") from exc
+            raise ProviderError(f"{self.name} sent a response terminex couldn't read") from exc
 
-        assets = payload.get("data")
+        assets = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(assets, list):
             raise ProviderError("missing 'data' in payload")
 
         provider_time: datetime | None = None
-        ts = payload.get("timestamp")
-        if isinstance(ts, (int, float)):
-            provider_time = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
+        ts = finite_number(payload.get("timestamp"))
+        if ts is not None:
+            try:
+                provider_time = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                provider_time = None
 
         quotes: list[Quote] = []
         for asset in assets:
-            price_str = asset.get("priceUsd")
-            if price_str is None:
+            if not isinstance(asset, dict):
                 continue
-            try:
-                price = float(price_str)
-            except (TypeError, ValueError):
+            price = _number(asset.get("priceUsd"))
+            if price is None or price <= 0:
                 continue
-            change_str = asset.get("changePercent24Hr")
-            try:
-                change = float(change_str) if change_str is not None else None
-            except (TypeError, ValueError):
-                change = None
+            change = _number(asset.get("changePercent24Hr"))
             rank_str = asset.get("rank")
             try:
                 rank = int(rank_str) if rank_str is not None else None
@@ -99,3 +103,13 @@ class CryptoCoinCap(Provider):
             provider_time=provider_time,
             provider_name=self.name,
         )
+
+
+def _number(value: object) -> float | None:
+    """CoinCap sends numbers as strings; accept only finite values."""
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            return None
+    return finite_number(value)

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import math
+
 from collections.abc import Callable
 from typing import Literal
 
+from rich.console import Console
+from rich.measure import Measurement
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -41,6 +45,8 @@ from .sparkline import render as render_sparkline
 
 SeriesGetter = Callable[[str, str], list]
 
+TREND_WIDTH = 20
+
 _ASSET_TITLES = {
     "fx": "top 25 FX rates",
     "crypto": "top cryptocurrencies by market cap",
@@ -66,18 +72,39 @@ _ASSET_NAME_COLS = {
 }
 
 
-def _format_price(value: float) -> str:
+def _format_price(value: float, asset: str = "fx") -> str:
+    """Format a price for its asset class.
+
+    FX rates and commodities keep 4-5 decimals (how they are quoted).
+    Crypto at or above $1 shows cents; below $1 it keeps four
+    significant digits, so a $0.00001234 coin doesn't round to zero.
+    """
     if value >= 1000:
         return f"{value:,.2f}"
+    if asset == "crypto":
+        if value >= 1:
+            return f"{value:.2f}"
+        if value <= 0:
+            return "0.00"
+        decimals = min(10, 3 - math.floor(math.log10(value)))
+        return f"{value:.{decimals}f}"
     if value >= 1:
         return f"{value:.4f}"
-    return f"{value:.5f}"
+    if value <= 0:
+        return f"{0:.5f}"
+    # At least 4 significant digits: 1 IDR is about $0.0000613.
+    decimals = min(10, max(5, 3 - math.floor(math.log10(value))))
+    return f"{value:.{decimals}f}"
+
+
+# Changes that would print as "+0.00%" / "-0.00%" are shown as no change.
+_ZERO_PCT = 0.005
 
 
 def _format_pct(value: float | None) -> Text:
     if value is None:
         return Text("·", style=theme.NEUTRAL)
-    if abs(value) < 1e-4:
+    if abs(value) < _ZERO_PCT:
         return Text("·", style=theme.NEUTRAL)
     arrow = "▲" if value > 0 else "▼"
     return Text(f"{arrow} {value:+.2f}%", style=theme.pct_style(value))
@@ -88,10 +115,27 @@ def _delta_cell(current: float, previous: float | None) -> Text:
         return Text("·", style=theme.NEUTRAL)
     diff = current - previous
     pct = (diff / previous) * 100.0
-    if abs(pct) < 1e-4:
+    if abs(pct) < _ZERO_PCT:
         return Text("·", style=theme.NEUTRAL)
     arrow = "▲" if diff > 0 else "▼"
     return Text(f"{arrow} {pct:+.2f}%", style=theme.pct_style(diff))
+
+
+def _trend_cell(q, asset: str, series_getter: SeriesGetter) -> Text:
+    """Provider history (7 days) when available, else the live series."""
+    history = q.meta.get("history")
+    if history:
+        return render_sparkline(
+            history, width=TREND_WIDTH, change_pct=q.meta.get("change_7d_pct")
+        )
+    # Rows can name the series to draw (watchlist FX pins use USD prices).
+    series_asset, series_symbol = q.meta.get("series_key") or (asset, q.symbol)
+    return render_sparkline(series_getter(series_asset, series_symbol), width=TREND_WIDTH)
+
+
+# Columns that may be dropped to fit a narrow terminal, least useful first.
+# Pointer, star, symbol, price and 24h % are never dropped.
+_DROP_ORDER: tuple[str, ...] = ("delta", "rank", "name", "trend")
 
 
 def build_table(
@@ -103,10 +147,23 @@ def build_table(
     current_tab_asset: str | None = None,
     is_watchlist: bool = False,
     series_getter: SeriesGetter | None = None,
+    hidden: frozenset[str] = frozenset(),
+    rows: slice | None = None,
+    ranks: dict[str, int] | None = None,
 ) -> Table:
+    """Render ``snapshot`` as a table.
+
+    ``hidden`` names optional columns to leave out (see ``_DROP_ORDER``).
+    ``rows`` limits the table to a window of quotes; ``selected_index``
+    stays absolute, and the caption says which rows show. The ``#`` column
+    shows the provider's rank (``meta["rank"]``), else ``ranks[symbol]``
+    (position before sorting/filtering), else the row number.
+    """
     asset = snapshot.asset_class
     ccy = snapshot.quote_ccy
     pinned_set = pinned_set or set()
+    total = len(snapshot.quotes)
+    window = range(total)[rows] if rows is not None else range(total)
 
     if is_watchlist:
         title = f"terminex  ·  watchlist (quote {ccy})"
@@ -114,11 +171,10 @@ def build_table(
         title = f"terminex  ·  {_ASSET_TITLES[asset]} (quote {ccy})"
 
     caption_parts: list[str] = []
+    if len(window) < total and len(window) > 0:
+        caption_parts.append(f"rows {window[0] + 1}–{window[-1] + 1} of {total}")
     if snapshot.provider_name and not is_watchlist:
         caption_parts.append(f"via {snapshot.provider_name}")
-    has_unit_notes = any(q.meta.get("unit_note") for q in snapshot.quotes)
-    if has_unit_notes:
-        caption_parts.append("† exchange pts (not USD/unit)")
 
     table = Table(
         title=title,
@@ -128,35 +184,58 @@ def build_table(
         caption_style=theme.CAPTION_STYLE,
         expand=False,
     )
+    show_rank = "rank" not in hidden
+    show_name = "name" not in hidden
+    show_trend = series_getter is not None and "trend" not in hidden
+    show_delta = "delta" not in hidden
+    show_unit = asset == "commodity" and not is_watchlist
+
+    # Every column is no_wrap so a row is always one line: the viewport
+    # math in the app counts on it. Names truncate with an ellipsis.
     table.add_column(" ", justify="left", width=1)  # selected-row pointer
     table.add_column("★", justify="center", style=theme.STAR, width=1)
-    table.add_column("#", justify="right", style=theme.MUTED, width=3)
+    if show_rank:
+        table.add_column("#", justify="right", style=theme.MUTED, width=3, no_wrap=True)
     if is_watchlist:
-        table.add_column("Asset", style=theme.MUTED)
-        table.add_column("Symbol", style="bold")
-        table.add_column("Name")
-        table.add_column(f"Price ({ccy})", justify="right")
+        table.add_column("Asset", style=theme.MUTED, no_wrap=True)
+        table.add_column("Symbol", style="bold", no_wrap=True)
+        if show_name:
+            table.add_column("Name", no_wrap=True, overflow="ellipsis")
+        table.add_column(f"Price ({ccy})", justify="right", no_wrap=True)
     else:
-        table.add_column(_ASSET_SYMBOL_COLS[asset], style="bold")
-        table.add_column(_ASSET_NAME_COLS[asset])
+        table.add_column(_ASSET_SYMBOL_COLS[asset], style="bold", no_wrap=True)
+        if show_name:
+            table.add_column(_ASSET_NAME_COLS[asset], no_wrap=True, overflow="ellipsis")
         table.add_column(
-            _ASSET_PRICE_COLS[asset].format(ccy=ccy), justify="right"
+            _ASSET_PRICE_COLS[asset].format(ccy=ccy), justify="right", no_wrap=True
         )
-    table.add_column("24h %", justify="right")
-    if series_getter is not None:
-        table.add_column("Trend", justify="left", no_wrap=True)
-    table.add_column("Δ since last", justify="right")
+        if show_unit:
+            table.add_column("Unit", style=theme.MUTED, no_wrap=True)
+    table.add_column("24h %", justify="right", no_wrap=True)
+    if show_trend:
+        has_history = any(q.meta.get("history") for q in snapshot.quotes)
+        if is_watchlist:
+            trend_title = "Trend"
+        elif has_history:
+            trend_title = "Trend (7d)"
+        else:
+            trend_title = "Trend (live)"
+        table.add_column(trend_title, justify="left", no_wrap=True)
+    if show_delta:
+        table.add_column("Δ since last", justify="right", no_wrap=True)
 
-    for idx, q in enumerate(snapshot.quotes, start=1):
-        # decide pin glyph
+    for i in window:
+        q = snapshot.quotes[i]
         row_asset = q.meta.get("source_tab") if is_watchlist else current_tab_asset
-        is_pinned = (
-            bool(row_asset) and (row_asset, q.symbol) in pinned_set
-        )
+        is_pinned = bool(row_asset) and (row_asset, q.symbol) in pinned_set
         star = "★" if is_pinned else ""
 
         is_pending = bool(q.meta.get("pending"))
-        if is_pending:
+        if q.meta.get("unavailable"):
+            price_text = Text("unavailable", style=theme.MUTED)
+            pct_text = Text("·", style=theme.NEUTRAL)
+            delta_text = Text("·", style=theme.NEUTRAL)
+        elif is_pending:
             price_text = Text("loading…", style=theme.MUTED)
             pct_text = Text("·", style=theme.NEUTRAL)
             delta_text = Text("·", style=theme.NEUTRAL)
@@ -165,28 +244,68 @@ def build_table(
             pct_text = Text("·", style=theme.NEUTRAL)
             delta_text = Text("·", style=theme.NEUTRAL)
         else:
-            price_str = _format_price(q.price)
-            if q.meta.get("unit_note"):
-                price_str += " †"
-            price_text = Text(price_str)
+            price_text = Text(_format_price(q.price, row_asset or asset))
             pct_text = _format_pct(q.change_24h_pct)
             prev_val = previous.get(q.symbol) if previous else None
             delta_text = _delta_cell(q.price, prev_val)
 
-        is_selected = selected_index == idx - 1
+        is_selected = selected_index == i
         pointer = (
             Text("▍", style=f"bold {theme.POINTER}") if is_selected else ""
         )
-        row: list = [pointer, star, str(idx)]
+        row: list = [pointer, star]
+        if show_rank:
+            # The watchlist numbers its own rows; other tabs keep the
+            # provider's rank, else the row's position before sorting.
+            provider_rank = None if is_watchlist else q.meta.get("rank")
+            rank = provider_rank or (ranks or {}).get(q.symbol) or i + 1
+            row.append(str(rank))
         if is_watchlist:
             row.append(q.meta.get("source_label", "?"))
-        row += [q.symbol, q.name, price_text, pct_text]
-        if series_getter is not None:
-            series_key_asset = row_asset or asset
-            series = series_getter(series_key_asset, q.symbol)
-            row.append(render_sparkline(series, width=20))
-        row.append(delta_text)
+        row.append(q.symbol)
+        if show_name:
+            row.append(q.name)
+        row.append(price_text)
+        if show_unit:
+            unit = q.meta.get("unit")
+            row.append(f"/{unit}" if unit else "")
+        row.append(pct_text)
+        if show_trend:
+            row.append(_trend_cell(q, row_asset or asset, series_getter))
+        if show_delta:
+            row.append(delta_text)
         row_style = theme.HIGHLIGHT_ROW_STYLE if is_selected else None
         table.add_row(*row, style=row_style)
 
     return table
+
+
+def fit_hidden(
+    build: Callable[[frozenset[str]], Table], console: Console
+) -> tuple[frozenset[str], int]:
+    """Fewest optional columns to drop so the table fits ``console.width``.
+
+    Returns ``(hidden, width)``: the natural width of the table with those
+    columns hidden. If even the essential columns don't fit, ``width`` is
+    larger than the console and the caller should not render the table
+    (Rich would truncate cells, prices included).
+    """
+    # Measure the natural width: Measurement clamps to options.max_width.
+    unbounded = console.options.update_width(10_000)
+    hidden: frozenset[str] = frozenset()
+    width = 0
+    for col in (None, *_DROP_ORDER):
+        if col is not None:
+            hidden = hidden | {col}
+        width = Measurement.get(console, unbounded, build(hidden)).maximum
+        if width <= console.width:
+            break
+    return hidden, width
+
+
+def scroll_offset(selected: int, offset: int, visible: int, total: int) -> int:
+    """First row to show so ``selected`` stays inside a window of ``visible``."""
+    if visible >= total:
+        return 0
+    offset = min(max(offset, selected - visible + 1), selected)
+    return max(0, min(offset, total - visible))

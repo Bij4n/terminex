@@ -1,4 +1,4 @@
-"""Unicode block sparklines for price series."""
+"""Unicode block sparklines with a % change label, for the Trend column."""
 
 from __future__ import annotations
 
@@ -10,41 +10,79 @@ from . import theme
 
 BLOCKS = "▁▂▃▄▅▆▇█"
 
+# The vertical scale never spans less than this share of the price, so a
+# stablecoin drifting 0.04% draws as a flat line instead of a cliff.
+MIN_SCALE_PCT = 0.5
 
-def render(series: Sequence[float], width: int = 20) -> Text:
-    """Render a sparkline from a price series.
+# " +12.34%" — the label is right-aligned in a fixed width.
+LABEL_WIDTH = 8
 
-    Trailing ``width`` points are used. Scaling is local to the series
-    (min → ▁, max → █). An all-equal series renders as a flat middle bar.
-    Color tracks net direction from first to last point.
+
+def sample(series: Sequence[float], width: int) -> list[float]:
+    """Reduce ``series`` to at most ``width`` evenly spaced points.
+
+    The first and last points are always kept, so the line starts where
+    the period started and ends at the latest price.
     """
-    pts = list(series)[-width:]
-    if not pts:
-        return Text(" " * width, style=theme.MUTED)
+    pts = list(series)
+    n = len(pts)
+    if n <= width:
+        return pts
+    if width < 2:
+        return pts[-width:] if width else []
+    return [pts[round(i * (n - 1) / (width - 1))] for i in range(width)]
 
-    # Pad left with spaces so newly-started series don't stretch horizontally.
-    pad = " " * (width - len(pts))
 
-    lo = min(pts)
-    hi = max(pts)
-    if hi - lo < 1e-12:
-        body = BLOCKS[len(BLOCKS) // 2] * len(pts)
-    else:
-        span = hi - lo
-        steps = len(BLOCKS) - 1
-        body = "".join(
-            BLOCKS[int(round(((v - lo) / span) * steps))] for v in pts
-        )
+def render(
+    series: Sequence[float],
+    width: int = 20,
+    change_pct: float | None = None,
+) -> Text:
+    """Render ``series`` as ``width`` block glyphs plus a % change label.
 
-    if len(pts) >= 2:
-        first, last = pts[0], pts[-1]
-        if last > first:
-            style = theme.UP
-        elif last < first:
-            style = theme.DOWN
-        else:
-            style = theme.ACCENT
-    else:
+    The scale is the series' own min to max, widened to at least
+    ``MIN_SCALE_PCT`` of the midpoint and centred, so small moves stay
+    near the middle. ``change_pct`` labels the line (e.g. the provider's
+    7-day change); without it the label is first → last of the series.
+    Colour follows the sign of the change.
+    """
+    valid = [p for p in series if p > 0]
+    pts = sample(valid, width)
+    if len(pts) < 2:
+        # One point is not a trend; a lone block only confuses.
+        return Text("·".rjust(width) + " " * LABEL_WIDTH, style=theme.MUTED)
+
+    lo, hi = min(pts), max(pts)
+    mid = (lo + hi) / 2
+    span = max(hi - lo, mid * MIN_SCALE_PCT / 100)
+    bottom = mid - span / 2
+    steps = len(BLOCKS) - 1
+    body = "".join(
+        BLOCKS[max(0, min(steps, round((v - bottom) / span * steps)))]
+        for v in pts
+    )
+
+    if change_pct is None:
+        # From the full series: sampling must not change the reported move.
+        change_pct = (valid[-1] - valid[0]) / valid[0] * 100
+    if change_pct is None or abs(change_pct) < 0.005:
         style = theme.ACCENT
+    else:
+        style = theme.UP if change_pct > 0 else theme.DOWN
 
-    return Text(pad + body, style=style)
+    label = _format_change(change_pct) if change_pct is not None else ""
+    text = Text(" " * (width - len(pts)))
+    text.append(body, style=style)
+    text.append(label.rjust(LABEL_WIDTH), style=style)
+    return text
+
+
+def _format_change(pct: float) -> str:
+    """Signed percentage that fits the label width (fewer decimals as it grows)."""
+    if abs(pct) < 0.005:
+        return "0.00%"
+    if abs(pct) < 100:
+        return f"{pct:+.2f}%"
+    if abs(pct) < 1000:
+        return f"{pct:+.1f}%"
+    return f"{pct:+.0f}%"

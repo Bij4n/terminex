@@ -1,8 +1,10 @@
 """Alert evaluation against live snapshots.
 
-Holds in-memory ``last_price`` per (asset_class, symbol) to detect
-threshold *crossings* rather than firing every tick while the
-condition stays true.
+An alert fires when its condition holds and it is armed; firing disarms
+it, and seeing the condition false re-arms it. That makes alerts fire on
+*crossings* rather than every tick while the condition stays true. The
+armed flag lives in the database (see ``alerts.claim_fire``), so it holds
+across restarts and across several terminex windows.
 """
 
 from __future__ import annotations
@@ -24,46 +26,49 @@ class FireEvent:
 class AlertEngine:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
-        self._last_price: dict[tuple[str, str], float] = {}
 
     def evaluate(self, snapshot: Snapshot, asset_class: str) -> list[FireEvent]:
         quote_by_sym = {q.symbol: q.price for q in snapshot.quotes}
-        # Only load alerts for this asset_class
+        quote_by_sym.setdefault(snapshot.quote_ccy, 1.0)
         rows = self.conn.execute(
-            """
-            SELECT * FROM alerts
-            WHERE active = 1 AND asset_class = ?
-            """,
+            "SELECT * FROM alerts WHERE active = 1 AND asset_class = ?",
             (asset_class,),
         ).fetchall()
+
         fires: list[FireEvent] = []
         for row in rows:
             alert = _row_to_alert(row)
-            price = quote_by_sym.get(alert.symbol)
+            price = _price_in_alert_units(alert, snapshot.quote_ccy, quote_by_sym)
             if price is None:
                 continue
-            key = (asset_class, alert.symbol)
-            prev = self._last_price.get(key)
-            triggered = _is_triggered(alert, price, prev)
-            if triggered:
-                alerts_dao.record_fire(self.conn, alert.id, price)
-                if not alert.recurring:
-                    alerts_dao.deactivate(self.conn, alert.id)
-                fires.append(FireEvent(alert=alert, price=price))
-        # update last-seen prices for every symbol in this snapshot
-        for sym, price in quote_by_sym.items():
-            self._last_price[(asset_class, sym)] = price
+            if condition_met(alert.op, alert.threshold, price):
+                if alert.armed and alerts_dao.claim_fire(self.conn, alert, price):
+                    fires.append(FireEvent(alert=alert, price=price))
+            elif not alert.armed:
+                alerts_dao.rearm(self.conn, alert.id)
         return fires
 
 
-def _is_triggered(alert: Alert, price: float, prev: float | None) -> bool:
-    if alert.op == ">":
-        if price <= alert.threshold:
-            return False
-        # first observation OR prev did not satisfy the condition
-        return prev is None or prev <= alert.threshold
-    if alert.op == "<":
-        if price >= alert.threshold:
-            return False
-        return prev is None or prev >= alert.threshold
+def _price_in_alert_units(
+    alert: Alert, snapshot_base: str, rates: dict[str, float]
+) -> float | None:
+    """The price to compare with the threshold, in the alert's own units.
+
+    FX alerts are quoted per 1 unit of the base they were created under.
+    A window running another base converts through its own snapshot
+    (JPY per USD = JPY per EUR ÷ USD per EUR), so every window sees the
+    same condition and the shared armed flag can't flip-flop.
+    """
+    price = rates.get(alert.symbol)
+    if alert.asset_class != "fx" or alert.base == snapshot_base or price is None:
+        return price
+    per_base = rates.get(alert.base)
+    return price / per_base if per_base else None
+
+
+def condition_met(op: str, threshold: float, price: float) -> bool:
+    if op == ">":
+        return price > threshold
+    if op == "<":
+        return price < threshold
     return False

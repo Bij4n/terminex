@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     threshold       REAL NOT NULL,
     recurring       INTEGER NOT NULL DEFAULT 0,
     active          INTEGER NOT NULL DEFAULT 1,
+    armed           INTEGER NOT NULL DEFAULT 1, -- 0 after firing until the price leaves the condition
+    base            TEXT NOT NULL DEFAULT 'USD', -- FX: the base currency the threshold is quoted in
     created_at      TEXT NOT NULL,
     last_fired_at   TEXT
 );
@@ -75,7 +77,75 @@ def db_path() -> Path:
     return Path(base) / "terminex" / "terminex.db"
 
 
+# 0.4.0 read commodities from Stooq, which quoted these futures in US cents;
+# from 0.5.0 every commodity price is USD per unit. A saved threshold at or
+# above the value here can only be cents (none of these has ever traded near
+# that many dollars), so it is divided by 100. Smaller ones already look like
+# dollars and are left alone.
+_CENT_THRESHOLDS: dict[str, float] = {
+    "SI.F": 300.0,   # silver, $/oz
+    "HG.F": 30.0,    # copper, $/lb
+    "ZW.F": 50.0,    # wheat, $/bu
+    "ZC.F": 30.0,    # corn, $/bu
+    "ZS.F": 60.0,    # soybeans, $/bu
+    "KC.F": 20.0,    # coffee, $/lb
+    "SB.F": 3.0,     # sugar, $/lb
+    "CT.F": 10.0,    # cotton, $/lb
+}
+
+SCHEMA_VERSION = 3
+
+
+def _migrate(conn: sqlite3.Connection) -> list[str]:
+    """Bring an older database up to ``SCHEMA_VERSION``; return notices."""
+    notices: list[str] = []
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < 1:
+        converted = []
+        rows = conn.execute(
+            "SELECT id, symbol, threshold FROM alerts WHERE asset_class = 'commodity'"
+        ).fetchall()
+        for alert_id, symbol, threshold in rows:
+            floor = _CENT_THRESHOLDS.get(symbol)
+            if floor is not None and threshold >= floor:
+                new = round(threshold / 100.0, 6)
+                conn.execute(
+                    "UPDATE alerts SET threshold = ? WHERE id = ?", (new, alert_id)
+                )
+                converted.append(f"{symbol} {threshold:g} → {new:g}")
+        # Stored commodity prices are in the old units too.
+        conn.execute("DELETE FROM prices WHERE asset_class = 'commodity'")
+        if converted:
+            notices.append(
+                "commodity prices are now USD per unit; converted alert "
+                "thresholds from cents: " + ", ".join(converted)
+            )
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(alerts)")}
+    if version < 2 and "armed" not in columns:
+        # Alerts gained an armed flag: firing disarms, leaving the
+        # condition re-arms. A recurring alert that already fired starts
+        # disarmed, so upgrading doesn't re-fire it; the first update
+        # re-arms it if its condition no longer holds.
+        conn.execute("ALTER TABLE alerts ADD COLUMN armed INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            "UPDATE alerts SET armed = 0"
+            " WHERE recurring = 1 AND last_fired_at IS NOT NULL"
+        )
+    if version < 3 and "base" not in columns:
+        # FX thresholds are "units per 1 base"; 0.4.0's default base was USD.
+        conn.execute("ALTER TABLE alerts ADD COLUMN base TEXT NOT NULL DEFAULT 'USD'")
+    if version < SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    return notices
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
+    """Open (and migrate) the on-disk store. See ``open_store`` for notices."""
+    conn, _ = _connect(path)
+    return conn
+
+
+def _connect(path: Path | None) -> tuple[sqlite3.Connection, list[str]]:
     p = path or db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(p), isolation_level=None)
@@ -83,5 +153,42 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.executescript(SCHEMA)
+    # One write transaction for the whole migration: a second terminex
+    # starting at the same moment waits here, then sees it already done.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        notices = _migrate(conn)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
     _prune_prices(conn)
+    return conn, notices
+
+
+def connect_memory() -> sqlite3.Connection:
+    """A throwaway in-memory store with the same schema."""
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.executescript(SCHEMA)
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
+
+
+def open_store(path: Path | None = None) -> tuple[sqlite3.Connection, list[str]]:
+    """Open the on-disk store, or fall back to memory if it can't be written.
+
+    Prices don't need the database, so an unwritable data directory should
+    cost persistence, not the whole app. Returns ``(connection, notices)``:
+    things the user should be told at startup (a fallback, a migration).
+    """
+    p = path or db_path()
+    try:
+        return _connect(p)
+    except (OSError, sqlite3.Error) as exc:
+        reason = getattr(exc, "strerror", None) or str(exc)
+        return connect_memory(), [
+            f"can't write {p.parent} ({reason}); alerts and trend history "
+            "won't be saved this session"
+        ]

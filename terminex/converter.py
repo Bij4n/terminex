@@ -18,7 +18,7 @@ from . import theme
 from .quote import Snapshot
 
 # Case-insensitive. Amount allows commas as thousand-separators and a
-# decimal point. Symbols are word chars plus ``.`` (for stooq futures
+# decimal point. Symbols are word chars plus ``.`` (for futures
 # like ``GC.F``) and ``_``.
 _PATTERN = re.compile(
     r"""
@@ -78,6 +78,23 @@ def parse_query(expression: str) -> ParsedQuery:
     )
 
 
+def fx_usd_per_unit(snapshot: Snapshot) -> dict[str, float]:
+    """Return ``{code: USD per 1 unit}`` from an FX snapshot.
+
+    FX quotes are "units per 1 base" (``quote_ccy`` is the base). With a
+    USD base that is simply ``1 / rate``; with another base, the snapshot's
+    own USD row gives USD per base, so ``USD per X = usd_per_base / rate``.
+    Returns ``{}`` when a non-USD snapshot has no USD row to pivot on.
+    """
+    base = snapshot.quote_ccy.upper()
+    rates = {q.symbol.upper(): q.price for q in snapshot.quotes if q.price > 0}
+    rates[base] = 1.0
+    usd_per_base = rates.get("USD")
+    if not usd_per_base:
+        return {}
+    return {code: usd_per_base / rate for code, rate in rates.items()}
+
+
 def build_usd_lookup(snapshots: dict[str, Snapshot | None]) -> dict[str, float]:
     """Build ``{symbol: usd_per_unit}`` from loaded source snapshots.
 
@@ -86,31 +103,19 @@ def build_usd_lookup(snapshots: dict[str, Snapshot | None]) -> dict[str, float]:
     """
     lookup: dict[str, float] = {}
 
-    def add(asset_class: str, symbol: str, price: float, base: str) -> None:
-        sym = symbol.upper()
-        if sym in lookup:
-            return  # first-write-wins (preference order)
-        if price <= 0:
-            return
-        if asset_class == "fx":
-            # FX price is "foreign per 1 USD" when base==USD.
-            # 1 unit of foreign currency = 1/price USD.
-            if sym == base:
-                lookup[sym] = 1.0
-            else:
-                lookup[sym] = 1.0 / price
-        else:
-            # crypto + commodity: quote is in USD per unit already.
-            lookup[sym] = price
+    fx = snapshots.get("fx")
+    if fx is not None:
+        lookup.update(fx_usd_per_unit(fx))
 
-    # preference order
-    for asset_class in ("fx", "crypto", "commodity"):
+    for asset_class in ("crypto", "commodity"):
         snap = snapshots.get(asset_class)
         if snap is None:
             continue
-        base = snap.quote_ccy
         for q in snap.quotes:
-            add(asset_class, q.symbol, q.price, base)
+            sym = q.symbol.upper()
+            # crypto + commodity quotes are already USD per unit.
+            if sym not in lookup and q.price > 0:
+                lookup[sym] = q.price
 
     return lookup
 
