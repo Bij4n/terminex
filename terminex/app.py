@@ -420,6 +420,11 @@ class App:
                 pinned_set = {
                     (p.asset_class, p.symbol) for p in self.watchlist.pins
                 }
+                # "#" keeps each row's original position when sorted/filtered.
+                ranks = {
+                    q.symbol: i
+                    for i, q in enumerate(state.last_snapshot.quotes, start=1)
+                }
                 current_tab_asset = TAB_TO_ASSET_CLASS.get(self.active_tab)
 
                 def build(hidden, rows=None):
@@ -436,6 +441,7 @@ class App:
                         ),
                         hidden=hidden,
                         rows=rows,
+                        ranks=ranks,
                     )
 
                 body = self._fit_to_terminal(build, state, len(sorted_quotes))

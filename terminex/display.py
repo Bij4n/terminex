@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from collections.abc import Callable
 from typing import Literal
 
@@ -70,9 +72,22 @@ _ASSET_NAME_COLS = {
 }
 
 
-def _format_price(value: float) -> str:
+def _format_price(value: float, asset: str = "fx") -> str:
+    """Format a price for its asset class.
+
+    FX rates and commodities keep 4-5 decimals (how they are quoted).
+    Crypto at or above $1 shows cents; below $1 it keeps four
+    significant digits, so a $0.00001234 coin doesn't round to zero.
+    """
     if value >= 1000:
         return f"{value:,.2f}"
+    if asset == "crypto":
+        if value >= 1:
+            return f"{value:.2f}"
+        if value <= 0:
+            return "0.00"
+        decimals = min(10, 3 - math.floor(math.log10(value)))
+        return f"{value:.{decimals}f}"
     if value >= 1:
         return f"{value:.4f}"
     return f"{value:.5f}"
@@ -132,12 +147,15 @@ def build_table(
     series_getter: SeriesGetter | None = None,
     hidden: frozenset[str] = frozenset(),
     rows: slice | None = None,
+    ranks: dict[str, int] | None = None,
 ) -> Table:
     """Render ``snapshot`` as a table.
 
     ``hidden`` names optional columns to leave out (see ``_DROP_ORDER``).
-    ``rows`` limits the table to a window of quotes; numbering and
-    ``selected_index`` stay absolute, and the caption says which rows show.
+    ``rows`` limits the table to a window of quotes; ``selected_index``
+    stays absolute, and the caption says which rows show. The ``#`` column
+    shows the provider's rank (``meta["rank"]``), else ``ranks[symbol]``
+    (position before sorting/filtering), else the row number.
     """
     asset = snapshot.asset_class
     ccy = snapshot.quote_ccy
@@ -220,7 +238,7 @@ def build_table(
             pct_text = Text("·", style=theme.NEUTRAL)
             delta_text = Text("·", style=theme.NEUTRAL)
         else:
-            price_text = Text(_format_price(q.price))
+            price_text = Text(_format_price(q.price, row_asset or asset))
             pct_text = _format_pct(q.change_24h_pct)
             prev_val = previous.get(q.symbol) if previous else None
             delta_text = _delta_cell(q.price, prev_val)
@@ -231,7 +249,8 @@ def build_table(
         )
         row: list = [pointer, star]
         if show_rank:
-            row.append(str(i + 1))
+            rank = q.meta.get("rank") or (ranks or {}).get(q.symbol) or i + 1
+            row.append(str(rank))
         if is_watchlist:
             row.append(q.meta.get("source_label", "?"))
         row.append(q.symbol)
