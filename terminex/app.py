@@ -906,7 +906,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         from importlib.metadata import version as _pkg_version
         _version = _pkg_version("terminex")
     except Exception:
-        _version = "0.4.0"
+        _version = "unknown"
     parser = argparse.ArgumentParser(
         prog="terminex",
         description=(
