@@ -163,6 +163,24 @@ class TestCoinCapPayloads(unittest.TestCase):
         self.assertIsNone(snap.provider_time)
 
 
+class TestEmptyResultsAreErrors(unittest.TestCase):
+    def test_every_provider_rejects_an_empty_result(self):
+        from terminex.providers.crypto_coincap import CryptoCoinCap
+        from terminex.providers.fx_erapi import FxERApi
+        cases = [
+            ("crypto_coingecko", CryptoCoinGecko(), []),
+            ("crypto_coincap", CryptoCoinCap(api_key="k"), {"data": []}),
+            ("fx_erapi", FxERApi(), {"result": "success", "rates": {"XXX": 1.0}}),
+            ("commodities_yahoo", CommoditiesYahoo(), {}),
+        ]
+        for module, provider, payload in cases:
+            with self.subTest(provider=provider.name):
+                with mock.patch(f"terminex.providers.{module}.requests.get",
+                                return_value=_response(200, payload)):
+                    with self.assertRaises(ProviderError):
+                        provider.fetch()
+
+
 class TestCoinGeckoPayloads(unittest.TestCase):
     def test_non_finite_values_are_dropped(self):
         resp = _response(200, [

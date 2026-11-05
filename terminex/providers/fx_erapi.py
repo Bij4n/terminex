@@ -72,6 +72,11 @@ class FxERApi(Provider):
                 )
             )
 
+        if not any(q.symbol != self.base for q in quotes):
+            # Only the base (always 1.0) would look like a quiet market;
+            # say the feed sent nothing usable (usually a format change).
+            raise ProviderError(f"{self.name} returned no usable rates")
+
         return Snapshot(
             asset_class="fx",
             quote_ccy=self.base,
