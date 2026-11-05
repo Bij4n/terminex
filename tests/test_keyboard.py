@@ -86,5 +86,33 @@ class TestListenerOverPty(unittest.TestCase):
         self.assertEqual(self._drain_after("é".encode()), ["é"])
 
 
+
+class TestStartupInterrupted(unittest.TestCase):
+    """A signal landing mid-start must not leave the tty in cbreak mode."""
+
+    def test_system_exit_right_after_setcbreak_restores_the_tty(self):
+        import termios
+        import tty
+        from unittest import mock
+
+        master, slave = os.openpty()
+        try:
+            before = termios.tcgetattr(slave)
+            real_setcbreak = tty.setcbreak
+
+            def setcbreak_then_signal(fd, *args):
+                real_setcbreak(fd, *args)
+                raise SystemExit(143)
+
+            kb = KeyboardListener(fd=slave)
+            with mock.patch("terminex.keyboard.tty.setcbreak", setcbreak_then_signal):
+                with self.assertRaises(SystemExit):
+                    kb.start()
+            self.assertEqual(termios.tcgetattr(slave), before)
+        finally:
+            os.close(master)
+            os.close(slave)
+
+
 if __name__ == "__main__":
     unittest.main()

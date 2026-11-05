@@ -906,8 +906,8 @@ class App:
         self._refresh(self.active_tab)
 
         kb = KeyboardListener()
-        kb.start()
         try:
+            kb.start()
             with Live(
                 self._render(),
                 console=self.console,

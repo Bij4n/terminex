@@ -107,15 +107,17 @@ class KeyboardListener:
         elif not os.isatty(fd):
             return
         old_attrs = termios.tcgetattr(fd)
-        try:
-            tty.setcbreak(fd)
-        except Exception:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-            raise
+        # Record the saved mode before changing it, and roll back on any
+        # exception, including SystemExit from a SIGTERM landing mid-start.
         self._fd = fd
         self._old_attrs = old_attrs
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        try:
+            tty.setcbreak(fd)
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+        except BaseException:
+            self.stop()
+            raise
 
     def stop(self) -> None:
         self._stop.set()
