@@ -5,7 +5,12 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from terminex.providers.base import ProviderError, RateLimitError, parse_retry_after
+from terminex.providers.base import (
+    ProviderError,
+    RateLimitError,
+    describe_request_error,
+    parse_retry_after,
+)
 from terminex.providers.commodities_yahoo import CommoditiesYahoo
 from terminex.providers.crypto_coingecko import CryptoCoinGecko
 
@@ -189,6 +194,31 @@ class TestRetryAfter(unittest.TestCase):
         with mock.patch("terminex.providers.crypto_coingecko.requests.get", return_value=resp):
             with self.assertRaises(RateLimitError):
                 CryptoCoinGecko().fetch()
+
+
+
+class TestRequestErrorMessages(unittest.TestCase):
+    def test_plain_sentences(self):
+        import requests
+        name = "open.er-api.com"
+        self.assertEqual(
+            describe_request_error(name, requests.ConnectionError("HTTPSConnectionPool(...) NameResolutionError")),
+            "can't reach open.er-api.com — check your connection",
+        )
+        self.assertEqual(describe_request_error(name, requests.Timeout("read timeout")),
+                         "open.er-api.com didn't answer in time")
+        resp = mock.Mock(status_code=503)
+        self.assertEqual(describe_request_error(name, requests.HTTPError("503", response=resp)),
+                         "open.er-api.com returned HTTP 503")
+
+    def test_provider_uses_it(self):
+        import requests
+        from terminex.providers.fx_erapi import FxERApi
+        with mock.patch("terminex.providers.fx_erapi.requests.get",
+                        side_effect=requests.ConnectionError("Max retries exceeded ... ProxyError(...)")):
+            with self.assertRaises(ProviderError) as ctx:
+                FxERApi().fetch()
+        self.assertEqual(str(ctx.exception), "can't reach open.er-api.com — check your connection")
 
 
 if __name__ == "__main__":

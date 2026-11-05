@@ -229,7 +229,11 @@ def build_table(
         star = "★" if is_pinned else ""
 
         is_pending = bool(q.meta.get("pending"))
-        if is_pending:
+        if q.meta.get("unavailable"):
+            price_text = Text("unavailable", style=theme.MUTED)
+            pct_text = Text("·", style=theme.NEUTRAL)
+            delta_text = Text("·", style=theme.NEUTRAL)
+        elif is_pending:
             price_text = Text("loading…", style=theme.MUTED)
             pct_text = Text("·", style=theme.NEUTRAL)
             delta_text = Text("·", style=theme.NEUTRAL)

@@ -21,6 +21,7 @@ from ..quote import Quote, Snapshot
 from .base import (
     Provider,
     ProviderError,
+    describe_request_error,
     RateLimitError,
     finite_number,
     parse_retry_after,
@@ -90,11 +91,11 @@ class CommoditiesYahoo(Provider):
                 timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise ProviderError(f"could not reach {self.name}: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
 
         if resp.status_code == 429:
             raise RateLimitError(
-                f"{self.name} rate limited — retrying automatically.",
+                f"{self.name} rate limited this connection.",
                 retry_after=parse_retry_after(
                     resp.headers.get("Retry-After"), DEFAULT_RETRY_AFTER
                 ),
@@ -103,9 +104,9 @@ class CommoditiesYahoo(Provider):
             resp.raise_for_status()
             payload = resp.json()
         except requests.HTTPError as exc:
-            raise ProviderError(f"{self.name} request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
         except ValueError as exc:
-            raise ProviderError(f"{self.name} sent invalid JSON: {exc}") from exc
+            raise ProviderError(f"{self.name} sent a response terminex couldn't read") from exc
 
         if not isinstance(payload, dict):
             raise ProviderError(f"{self.name} sent an unexpected payload")

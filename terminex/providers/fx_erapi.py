@@ -8,7 +8,7 @@ import requests
 
 from ..currencies import NAMES, TOP_25
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError, finite_number
+from .base import Provider, ProviderError, describe_request_error, finite_number
 
 API_URL = "https://open.er-api.com/v6/latest/{base}"
 TIMEOUT = 10.0
@@ -30,9 +30,9 @@ class FxERApi(Provider):
             resp.raise_for_status()
             payload = resp.json()
         except requests.RequestException as exc:
-            raise ProviderError(f"request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
         except ValueError as exc:
-            raise ProviderError(f"invalid json: {exc}") from exc
+            raise ProviderError(f"{self.name} sent a response terminex couldn't read") from exc
 
         if payload.get("result") != "success":
             error_type = payload.get("error-type")

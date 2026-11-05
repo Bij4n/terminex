@@ -11,6 +11,7 @@ from ..quote import Quote, Snapshot
 from .base import (
     Provider,
     ProviderError,
+    describe_request_error,
     RateLimitError,
     finite_number,
     parse_retry_after,
@@ -41,12 +42,12 @@ class CryptoCoinCap(Provider):
                 timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise ProviderError(f"request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
 
         if resp.status_code == 429:
             retry_after = parse_retry_after(resp.headers.get("Retry-After"), 60.0)
             raise RateLimitError(
-                "CoinCap rate limited — retrying automatically.",
+                "CoinCap rate limited this connection.",
                 retry_after=retry_after,
             )
 
@@ -54,9 +55,9 @@ class CryptoCoinCap(Provider):
             resp.raise_for_status()
             payload = resp.json()
         except requests.HTTPError as exc:
-            raise ProviderError(f"request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
         except ValueError as exc:
-            raise ProviderError(f"invalid json: {exc}") from exc
+            raise ProviderError(f"{self.name} sent a response terminex couldn't read") from exc
 
         assets = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(assets, list):

@@ -66,6 +66,24 @@ def parse_retry_after(value: str | None, default: float) -> float:
     return max(1.0, min(MAX_RETRY_AFTER, seconds))
 
 
+def describe_request_error(name: str, exc: Exception) -> str:
+    """One plain sentence for a failed HTTP request to ``name``.
+
+    The raw requests exception (pools, proxies, retries) is noise to a
+    user; what matters is whether the host was unreachable, slow, or said no.
+    """
+    import requests
+
+    if isinstance(exc, requests.Timeout):
+        return f"{name} didn't answer in time"
+    if isinstance(exc, requests.HTTPError):
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        return f"{name} returned HTTP {code}" if code else f"{name} returned an error"
+    if isinstance(exc, requests.ConnectionError):
+        return f"can't reach {name} — check your connection"
+    return f"request to {name} failed ({type(exc).__name__})"
+
+
 class Provider(ABC):
     name: str
     asset_class: AssetClass

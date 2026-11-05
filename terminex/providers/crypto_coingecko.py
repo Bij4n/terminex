@@ -16,6 +16,7 @@ from ..quote import Quote, Snapshot
 from .base import (
     Provider,
     ProviderError,
+    describe_request_error,
     RateLimitError,
     finite_number,
     parse_retry_after,
@@ -50,12 +51,12 @@ class CryptoCoinGecko(Provider):
                 timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise ProviderError(f"request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
 
         if resp.status_code == 429:
             retry_after = parse_retry_after(resp.headers.get("Retry-After"), 60.0)
             raise RateLimitError(
-                "CoinGecko rate limited — retrying automatically. "
+                "CoinGecko rate limited this connection. "
                 "Set TERMINEX_COINCAP_KEY for a more reliable crypto feed.",
                 retry_after=retry_after,
             )
@@ -64,9 +65,9 @@ class CryptoCoinGecko(Provider):
             resp.raise_for_status()
             payload = resp.json()
         except requests.HTTPError as exc:
-            raise ProviderError(f"request failed: {exc}") from exc
+            raise ProviderError(describe_request_error(self.name, exc)) from exc
         except ValueError as exc:
-            raise ProviderError(f"invalid json: {exc}") from exc
+            raise ProviderError(f"{self.name} sent a response terminex couldn't read") from exc
 
         if not isinstance(payload, list):
             raise ProviderError("unexpected payload shape (not a list)")

@@ -36,6 +36,16 @@ class TestWatchlistPrices(unittest.TestCase):
         btc = self._fetch()["BTC"]
         self.assertEqual((btc.price, btc.change_24h_pct), (80000.0, 4.8))
 
+    def test_pin_from_a_failed_feed_says_unavailable(self):
+        agg = WatchlistAggregator(
+            self.watchlist, lambda ac, sym: None,
+            source_failed=lambda ac: ac == "crypto",
+        )
+        rows = {q.symbol: q for q in agg.fetch().quotes}
+        self.assertTrue(rows["BTC"].meta.get("unavailable"))
+        self.assertEqual(rows["BTC"].name, "(Crypto unavailable)")
+        self.assertTrue(rows["EUR"].meta.get("pending"))  # FX still loading
+
     def test_fx_pin_without_usd_price_is_pending(self):
         self.usd = {}
         self.assertTrue(self._fetch()["EUR"].meta.get("pending"))

@@ -114,6 +114,14 @@ TAB_LABELS = {
 }
 SOURCE_TABS: list[str] = ["fx", "crypto", "commodity"]
 FX_USD_SERIES = "fx_usd"  # series key for FX in USD per unit
+_FEED_NAMES = {"fx": "FX", "crypto": "crypto", "commodity": "commodity"}
+
+
+def _join_names(names: list[str]) -> str:
+    """["FX", "crypto", "commodity"] → "FX, crypto and commodity"."""
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
 # Map tab name → AssetClass for watchlist pins
 TAB_TO_ASSET_CLASS = {"fx": "fx", "crypto": "crypto", "commodity": "commodity"}
 
@@ -172,6 +180,7 @@ class App:
                 self.watchlist,
                 self._lookup_pinned_quote,
                 fx_usd_price=self._fx_usd_price,
+                source_failed=self._source_failed,
             )
         )
         self.console = Console()
@@ -215,6 +224,19 @@ class App:
             return f"{symbol} per 1 {base}"
         unit = quote.meta.get("unit")
         return f"USD/{unit}" if unit else "USD"
+
+    def _source_failed(self, tab_name: str) -> bool:
+        state = self.tabs[tab_name]
+        return state.last_snapshot is None and state.last_error is not None
+
+    def _retry_hint(self, state: TabState) -> str:
+        """When the next automatic attempt will happen, for error messages."""
+        now = time.monotonic()
+        if now < state.backoff_until:
+            wait = state.backoff_until - now
+        else:
+            wait = self._poll_interval(state) - (now - state.last_fetch_attempt)
+        return "retrying now" if wait < 1 else f"retrying in {wait:.0f}s"
 
     def _fx_usd_price(self, code: str) -> float | None:
         from .converter import fx_usd_per_unit
@@ -278,6 +300,8 @@ class App:
             else None
         )
         current = format_age(fetched_at)
+        if state.last_error is not None:
+            current += "|" + self._retry_hint(state)  # keep the countdown live
         if current != self._last_age:
             self._last_age = current
             return True
@@ -416,10 +440,18 @@ class App:
             return False
         if state.last_snapshot is None and state.last_error is None:
             return True
-        effective_interval = max(
-            self.interval, state.provider.min_poll_interval
-        )
-        return (now - state.last_fetch_attempt) >= effective_interval
+        return (now - state.last_fetch_attempt) >= self._poll_interval(state)
+
+    # A failed fetch (offline, timeout, 5xx) is retried at least this often,
+    # even for feeds whose normal floor is minutes long. Rate limits are
+    # handled separately by backoff_until.
+    _ERROR_RETRY = 30.0
+
+    def _poll_interval(self, state: TabState) -> float:
+        interval = max(self.interval, state.provider.min_poll_interval)
+        if state.last_error is not None:
+            interval = min(interval, max(self.interval, self._ERROR_RETRY))
+        return interval
 
     # ---- rendering ----
 
@@ -511,7 +543,7 @@ class App:
                 )
         elif state.last_error is not None:
             body = state_panel(
-                state.last_error,
+                f"{state.last_error}\n{self._retry_hint(state)}",
                 title=f"{TAB_LABELS[self.active_tab]} fetch error",
                 variant="error",
             )
@@ -616,7 +648,8 @@ class App:
             and state.last_snapshot is not None
         ):
             return Text(
-                f" stale — {state.last_error}", style=theme.ERROR
+                f" stale — {state.last_error} · {self._retry_hint(state)}",
+                style=theme.ERROR,
             )
         total = (
             len(state.last_snapshot.quotes)
@@ -880,7 +913,19 @@ class App:
             )
             try:
                 result = evaluate(expr, lookup)
-            except (ParseError, ResolveError) as exc:
+            except ResolveError as exc:
+                missing = [
+                    _FEED_NAMES[src]
+                    for src in SOURCE_TABS
+                    if self.tabs[src].last_snapshot is None
+                ]
+                self.converter_error = str(exc)
+                if missing:
+                    self.converter_error += (
+                        f" — {_join_names(missing)} prices aren't loaded"
+                    )
+                return True
+            except ParseError as exc:
                 self.converter_error = str(exc)
                 return True
             self.converter_error = None

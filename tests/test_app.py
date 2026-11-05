@@ -68,6 +68,35 @@ class AppTestCase(unittest.TestCase):
         return self.app.console.file.getvalue().splitlines()
 
 
+class TestOfflineMessages(AppTestCase):
+    def test_error_panel_says_when_it_retries(self):
+        crypto = FakeProvider(error=ProviderError("can't reach fake.example — check your connection"), floor=60.0)
+        self.app.tabs["crypto"].provider = crypto
+        self.app._refresh("crypto")
+        text = "\n".join(self.frame())
+        self.assertIn("can't reach fake.example", text)
+        self.assertRegex(text, r"retrying in (29|30)s")  # errors retry within 30s
+
+    def test_converter_names_the_missing_feed(self):
+        self.app.tabs["crypto"].provider = FakeProvider(error=ProviderError("can't reach fake.example"))
+        self.app.tabs["fx"].provider = FakeProvider(asset_class="fx", quotes=[
+            Quote("USD", "US Dollar", 1.0, "USD"), Quote("EUR", "Euro", 0.89, "USD")])
+        self.app.tabs["commodity"].provider = FakeProvider(asset_class="commodity", quotes=[
+            Quote("GC.F", "Gold", 4150.0, "USD")])
+        for tab in ("crypto", "fx", "commodity"):
+            self.app._refresh(tab)
+        self.app._handle_key("c")
+        for ch in "1 BTC in EUR\r":
+            self.app._handle_key(ch)
+        self.assertEqual(self.app.converter_error,
+                         "unknown symbol: 'BTC' — crypto prices aren't loaded")
+
+    def test_several_missing_feeds_read_naturally(self):
+        from terminex.app import _join_names
+        self.assertEqual(_join_names(["FX", "crypto", "commodity"]), "FX, crypto and commodity")
+        self.assertEqual(_join_names(["FX", "crypto"]), "FX and crypto")
+
+
 class TestUnexpectedProviderErrors(AppTestCase):
     def test_bug_in_a_provider_becomes_an_error_panel(self):
         self.app.tabs["crypto"].provider = FakeProvider(error=TypeError("'int' object is not iterable"))
@@ -126,6 +155,15 @@ class TestRateLimitsAndFloors(AppTestCase):
         self.app._handle_key("r")
         self.assertEqual(self.crypto.calls, 2)
         self.assertIsNone(self.app.tabs["crypto"].last_error)
+
+    def test_failed_fetch_retries_within_30s_even_with_a_long_floor(self):
+        fx = FakeProvider(asset_class="fx", error=ProviderError("can't reach fake.example"), floor=300.0)
+        self.app.tabs["fx"].provider = fx
+        self.app._refresh("fx")
+        self.clock.now += 29
+        self.assertFalse(self.app._needs_refresh("fx"))
+        self.clock.now += 1
+        self.assertTrue(self.app._needs_refresh("fx"))
 
     def test_scheduled_polling_waits_for_the_floor(self):
         self.app._refresh("crypto")
