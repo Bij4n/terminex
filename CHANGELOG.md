@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 (unreleased)
+## 0.5.0 (2026-11-04)
 
 A repair release. The Commodities tab in 0.4.0 stopped working when Stooq
 removed its CSV endpoint; this release moves it to Yahoo Finance and fixes
