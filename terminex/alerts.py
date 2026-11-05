@@ -29,6 +29,7 @@ class Alert:
     created_at: str
     last_fired_at: str | None
     armed: bool = True
+    base: str = "USD"  # FX: base currency the threshold is quoted in
 
 
 def _now_utc_iso() -> str:
@@ -44,16 +45,20 @@ def create(
     threshold: float,
     recurring: bool = False,
     armed: bool = True,
+    base: str = "USD",
 ) -> Alert:
     """Create an alert. Pass ``armed=False`` when the condition already
     holds, so it fires on the next crossing rather than straight away."""
     cur = conn.execute(
         """
         INSERT INTO alerts
-          (asset_class, symbol, op, threshold, recurring, active, armed, created_at)
-        VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+          (asset_class, symbol, op, threshold, recurring, active, armed, base, created_at)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
         """,
-        (asset_class, symbol, op, threshold, int(recurring), int(armed), _now_utc_iso()),
+        (
+            asset_class, symbol, op, threshold, int(recurring), int(armed),
+            base.upper(), _now_utc_iso(),
+        ),
     )
     return get(conn, cur.lastrowid)
 
@@ -132,4 +137,5 @@ def _row_to_alert(row: sqlite3.Row) -> Alert:
         created_at=row["created_at"],
         last_fired_at=row["last_fired_at"],
         armed=bool(row["armed"]),
+        base=row["base"],
     )

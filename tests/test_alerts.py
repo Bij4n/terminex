@@ -143,6 +143,8 @@ class TestAlertEngine(unittest.TestCase):
         alerts.create(self.conn, asset_class="fx", symbol="JPY", op="<",
                       threshold=160.0, recurring=True)
         self.engine.evaluate(_snap([Quote("JPY", "Y", 155.0, "USD")]), "fx")  # fires
+        # Long after the fire (no time window can be what holds it back):
+        self.conn.execute("UPDATE alerts SET last_fired_at = '2000-01-01T00:00:00+00:00'")
         restarted = AlertEngine(self.conn)
         self.assertEqual(restarted.evaluate(_snap([Quote("JPY", "Y", 154.0, "USD")]), "fx"), [])
 
@@ -221,6 +223,40 @@ class TestTwoInstances(unittest.TestCase):
 
     def test_recurring_fires_once_per_crossing(self):
         self.assertEqual(self._cross(recurring=True), 1)
+
+
+
+class TestFxAlertBase(unittest.TestCase):
+    """FX thresholds are in units per 1 base; the alert keeps its base."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.conn = connect(Path(self._tmp.name) / "t.db")
+
+    def tearDown(self):
+        self.conn.close()
+        self._tmp.cleanup()
+
+    def _fx(self, base, rows):
+        return Snapshot("fx", base, [Quote(s, s, p, base) for s, p in rows], datetime.now(tz=timezone.utc))
+
+    def test_alert_created_under_usd_is_evaluated_in_usd_from_a_eur_window(self):
+        alerts.create(self.conn, asset_class="fx", symbol="JPY", op="<",
+                      threshold=160.0, base="USD")
+        eur_window = AlertEngine(self.conn)
+        # 177.0 JPY per EUR / 1.1237 USD per EUR = 157.5 JPY per USD < 160
+        fires = eur_window.evaluate(self._fx("EUR", [("EUR", 1.0), ("USD", 1.1237), ("JPY", 177.0)]), "fx")
+        self.assertEqual(len(fires), 1)
+
+    def test_two_windows_with_different_bases_agree(self):
+        alerts.create(self.conn, asset_class="fx", symbol="JPY", op="<",
+                      threshold=160.0, base="USD", recurring=True)
+        usd, eur = AlertEngine(self.conn), AlertEngine(self.conn)
+        fired = 0
+        for _ in range(6):
+            fired += len(usd.evaluate(self._fx("USD", [("USD", 1.0), ("JPY", 150.0)]), "fx"))
+            fired += len(eur.evaluate(self._fx("EUR", [("EUR", 1.0), ("USD", 1.1), ("JPY", 165.0)]), "fx"))
+        self.assertEqual(fired, 1)  # 165/1.1 = 150 JPY per USD: same view, one fire
 
 
 if __name__ == "__main__":

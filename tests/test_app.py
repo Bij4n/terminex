@@ -321,6 +321,46 @@ class TestOverlaysSkipTheTable(AppTestCase):
         build.assert_not_called()
 
 
+class TestCreatingAlerts(AppTestCase):
+    def _create(self, op: str, threshold: str):
+        from terminex import alerts as alerts_dao
+        self.app._refresh("crypto")          # BTC at 80,000
+        self.app._handle_key("a")
+        draft = self.app.alert_draft
+        draft["threshold_buffer"] = threshold
+        draft["op"] = op
+        self.app._handle_key("\r")
+        return alerts_dao.list_all(self.app.store)[-1]
+
+    def test_condition_already_true_starts_disarmed(self):
+        self.assertFalse(self._create(">", "70000").armed)
+
+    def test_condition_not_yet_true_starts_armed(self):
+        self.assertTrue(self._create(">", "90000").armed)
+
+    def test_uses_the_price_at_enter_not_when_the_modal_opened(self):
+        from terminex import alerts as alerts_dao
+        self.app._refresh("crypto")
+        self.app._handle_key("a")                       # opened at 80,000
+        self.app.tabs["crypto"].provider.quotes = [Quote("BTC", "Bitcoin", 95000.0, "USD")]
+        self.app._refresh("crypto")                     # moved while typing
+        self.app.alert_draft["threshold_buffer"] = "90000"
+        self.app._handle_key("\r")
+        self.assertFalse(alerts_dao.list_all(self.app.store)[-1].armed)
+
+    def test_fx_alert_records_its_base(self):
+        from terminex import alerts as alerts_dao
+        self.app.tabs["fx"].provider = FakeProvider(asset_class="fx", quote_ccy="EUR", quotes=[
+            Quote("EUR", "Euro", 1.0, "EUR"), Quote("JPY", "Yen", 177.0, "EUR")])
+        self.app.tabs["fx"].provider.base = "EUR"
+        self.app.active_tab = "fx"
+        self.app._refresh("fx")
+        self.app.tabs["fx"].selected_index = 1
+        self.app._handle_key("a")
+        self.app._handle_key("\r")
+        self.assertEqual(alerts_dao.list_all(self.app.store)[-1].base, "EUR")
+
+
 class TestOnceRouting(unittest.TestCase):
     def test_once_flag_or_non_terminal_output(self):
         from terminex.app import _wants_once, parse_args

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     recurring       INTEGER NOT NULL DEFAULT 0,
     active          INTEGER NOT NULL DEFAULT 1,
     armed           INTEGER NOT NULL DEFAULT 1, -- 0 after firing until the price leaves the condition
+    base            TEXT NOT NULL DEFAULT 'USD', -- FX: the base currency the threshold is quoted in
     created_at      TEXT NOT NULL,
     last_fired_at   TEXT
 );
@@ -92,7 +93,7 @@ _CENT_THRESHOLDS: dict[str, float] = {
     "CT.F": 10.0,    # cotton, $/lb
 }
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _migrate(conn: sqlite3.Connection) -> list[str]:
@@ -119,14 +120,20 @@ def _migrate(conn: sqlite3.Connection) -> list[str]:
                 "commodity prices are now USD per unit; converted alert "
                 "thresholds from cents: " + ", ".join(converted)
             )
-    if version < 2:
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(alerts)")}
+    if version < 2 and "armed" not in columns:
         # Alerts gained an armed flag: firing disarms, leaving the
-        # condition re-arms. Existing alerts start armed.
-        columns = {r[1] for r in conn.execute("PRAGMA table_info(alerts)")}
-        if "armed" not in columns:
-            conn.execute(
-                "ALTER TABLE alerts ADD COLUMN armed INTEGER NOT NULL DEFAULT 1"
-            )
+        # condition re-arms. A recurring alert that already fired starts
+        # disarmed, so upgrading doesn't re-fire it; the first update
+        # re-arms it if its condition no longer holds.
+        conn.execute("ALTER TABLE alerts ADD COLUMN armed INTEGER NOT NULL DEFAULT 1")
+        conn.execute(
+            "UPDATE alerts SET armed = 0"
+            " WHERE recurring = 1 AND last_fired_at IS NOT NULL"
+        )
+    if version < 3 and "base" not in columns:
+        # FX thresholds are "units per 1 base"; 0.4.0's default base was USD.
+        conn.execute("ALTER TABLE alerts ADD COLUMN base TEXT NOT NULL DEFAULT 'USD'")
     if version < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return notices
@@ -146,7 +153,15 @@ def _connect(path: Path | None) -> tuple[sqlite3.Connection, list[str]]:
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     conn.executescript(SCHEMA)
-    notices = _migrate(conn)
+    # One write transaction for the whole migration: a second terminex
+    # starting at the same moment waits here, then sees it already done.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        notices = _migrate(conn)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
     _prune_prices(conn)
     return conn, notices
 

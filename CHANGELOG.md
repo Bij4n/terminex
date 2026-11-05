@@ -76,6 +76,9 @@ independent code review.
   $0.00006) showed a single significant digit.
 - Two terminex windows on the same database both fired the same alert, and
   recurring alerts re-fired on every restart while their condition held.
+- FX alerts were compared in the wrong units in a window running a
+  different `--base`. Alerts now keep the base they were created in
+  (existing ones are taken as USD, 0.4.0's default).
 - Alert fire times were shown as UTC dates.
 - The help overlay was cut off at 80×24.
 - Changes that round to zero were shown as `▼ -0.00%`.

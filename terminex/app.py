@@ -213,6 +213,12 @@ class App:
                 return q
         return None
 
+    def _alert_base(self, asset_class: str) -> str:
+        """Base currency an alert's threshold is quoted in."""
+        if asset_class == "fx":
+            return getattr(self.tabs["fx"].provider, "base", "USD")
+        return "USD"
+
     def _alert_unit(self, asset_class: str, symbol: str, quote: Quote) -> str:
         """Units the alert threshold is in (alerts compare source-tab prices).
 
@@ -220,8 +226,7 @@ class App:
         not the USD price the watchlist shows — so say so in the modal.
         """
         if asset_class == "fx":
-            base = getattr(self.tabs["fx"].provider, "base", "USD")
-            return f"{symbol} per 1 {base}"
+            return f"{symbol} per 1 {self._alert_base('fx')}"
         unit = quote.meta.get("unit")
         return f"USD/{unit}" if unit else "USD"
 
@@ -873,6 +878,10 @@ class App:
                 draft["error"] = "threshold must be positive"
                 return True
             from .alert_engine import condition_met
+            # Prices keep updating while the modal is open: judge "already
+            # true?" on the latest one.
+            latest = self._lookup_pinned_quote(draft["asset_class"], draft["symbol"])
+            current = latest.price if latest and latest.price > 0 else draft["current_price"]
             alerts_dao.create(
                 self.store,
                 asset_class=draft["asset_class"],
@@ -881,9 +890,8 @@ class App:
                 threshold=threshold,
                 recurring=draft["recurring"],
                 # Already true? Wait for a real crossing rather than firing now.
-                armed=not condition_met(
-                    draft["op"], threshold, draft["current_price"]
-                ),
+                armed=not condition_met(draft["op"], threshold, current),
+                base=self._alert_base(draft["asset_class"]),
             )
             self._set_toast(
                 f"alert created: {draft['symbol']} {draft['op']} "
