@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from terminex.providers.base import ProviderError, RateLimitError
+from terminex.providers.base import ProviderError, RateLimitError, parse_retry_after
 from terminex.providers.commodities_yahoo import CommoditiesYahoo
 from terminex.providers.crypto_coingecko import CryptoCoinGecko
 
@@ -105,6 +105,34 @@ class TestCommoditiesYahoo(unittest.TestCase):
     def test_http_error(self):
         with self.assertRaises(ProviderError):
             self._fetch(status=404, payload=None)
+
+
+
+class TestRetryAfter(unittest.TestCase):
+    def test_seconds(self):
+        self.assertEqual(parse_retry_after("30", default=60), 30.0)
+
+    def test_missing_or_garbage_uses_default(self):
+        self.assertEqual(parse_retry_after(None, default=60), 60.0)
+        self.assertEqual(parse_retry_after("soon", default=60), 60.0)
+
+    def test_http_date(self):
+        from email.utils import format_datetime
+        from datetime import datetime, timedelta, timezone
+        when = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=90), usegmt=True)
+        self.assertAlmostEqual(parse_retry_after(when, default=60), 90.0, delta=3)
+
+    def test_non_finite_and_extremes_are_bounded(self):
+        self.assertEqual(parse_retry_after("inf", default=60), 60.0)
+        self.assertEqual(parse_retry_after("nan", default=60), 60.0)
+        self.assertEqual(parse_retry_after("0", default=60), 1.0)
+        self.assertEqual(parse_retry_after("999999", default=60), 3600.0)
+
+    def test_coingecko_survives_a_date_header(self):
+        resp = _response(429, None, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
+        with mock.patch("terminex.providers.crypto_coingecko.requests.get", return_value=resp):
+            with self.assertRaises(RateLimitError):
+                CryptoCoinGecko().fetch()
 
 
 if __name__ == "__main__":

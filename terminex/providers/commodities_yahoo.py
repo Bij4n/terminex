@@ -18,7 +18,7 @@ from importlib.metadata import PackageNotFoundError, version
 import requests
 
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError, RateLimitError
+from .base import Provider, ProviderError, RateLimitError, parse_retry_after
 
 API_URL = "https://query1.finance.yahoo.com/v8/finance/spark"
 TIMEOUT = 10.0
@@ -89,7 +89,9 @@ class CommoditiesYahoo(Provider):
         if resp.status_code == 429:
             raise RateLimitError(
                 f"{self.name} rate limited — retrying automatically.",
-                retry_after=_retry_after(resp.headers),
+                retry_after=parse_retry_after(
+                    resp.headers.get("Retry-After"), DEFAULT_RETRY_AFTER
+                ),
             )
         try:
             resp.raise_for_status()
@@ -159,10 +161,3 @@ def _positive(value: object, scale: float) -> float | None:
     if isinstance(value, (int, float)) and value > 0:
         return float(value) * scale
     return None
-
-
-def _retry_after(headers) -> float:
-    try:
-        return max(1.0, float(headers.get("Retry-After", DEFAULT_RETRY_AFTER)))
-    except (TypeError, ValueError):
-        return DEFAULT_RETRY_AFTER

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import requests
 
 from ..quote import Quote, Snapshot
-from .base import Provider, ProviderError, RateLimitError
+from .base import Provider, ProviderError, RateLimitError, parse_retry_after
 
 API_URL = "https://api.coingecko.com/api/v3/coins/markets"
 TIMEOUT = 10.0
@@ -47,7 +47,7 @@ class CryptoCoinGecko(Provider):
             raise ProviderError(f"request failed: {exc}") from exc
 
         if resp.status_code == 429:
-            retry_after = float(resp.headers.get("Retry-After", 60))
+            retry_after = parse_retry_after(resp.headers.get("Retry-After"), 60.0)
             raise RateLimitError(
                 "CoinGecko rate limited — retrying automatically. "
                 "Set TERMINEX_COINCAP_KEY for a more reliable crypto feed.",

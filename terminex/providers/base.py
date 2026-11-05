@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from ..quote import AssetClass, Snapshot
 
@@ -21,6 +24,34 @@ class RateLimitError(ProviderError):
     def __init__(self, message: str, retry_after: float = 60.0) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+
+
+MAX_RETRY_AFTER = 3600.0
+
+
+def parse_retry_after(value: str | None, default: float) -> float:
+    """Seconds to wait from a ``Retry-After`` header.
+
+    Accepts delay-seconds or an HTTP date. Anything missing, malformed or
+    non-finite falls back to ``default``; the result is kept between 1 s
+    and an hour so a bad header can neither hammer nor stall a feed.
+    """
+    seconds: float | None = None
+    if value:
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                when = parsedate_to_datetime(value)
+            except (TypeError, ValueError, IndexError):
+                when = None
+            if when is not None:
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                seconds = (when - datetime.now(timezone.utc)).total_seconds()
+    if seconds is None or not math.isfinite(seconds):
+        seconds = default
+    return max(1.0, min(MAX_RETRY_AFTER, seconds))
 
 
 class Provider(ABC):
