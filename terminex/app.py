@@ -336,7 +336,12 @@ class App:
                 if src_state.last_snapshot is None and src_state.last_error is None:
                     self._refresh(src)
         state = self.tabs[tab_name]
-        state.last_fetch_attempt = time.monotonic()
+        now = time.monotonic()
+        if now < state.backoff_until:
+            # Every path (schedule, tab switch, `r`) goes through here, so
+            # nothing can send a request while a provider is backing off.
+            return
+        state.last_fetch_attempt = now
         try:
             snap = state.provider.fetch()
         except RateLimitError as exc:
@@ -371,6 +376,31 @@ class App:
             and self.tabs["watchlist"].last_snapshot is not None
         ):
             self.tabs["watchlist"].last_fetch_attempt = 0.0
+
+    def _manual_refresh(self, tab_name: str) -> None:
+        """`r`: refresh now unless the provider can't give anything new yet."""
+        state = self.tabs[tab_name]
+        provider = state.provider
+        now = time.monotonic()
+        if now < state.backoff_until:
+            wait = state.backoff_until - now
+            self._set_toast(
+                f"{provider.name} is rate limited — retrying in {wait:.0f}s",
+                seconds=3.0,
+            )
+            return
+        # After an error, retry at once. After a success, a provider with a
+        # poll floor has nothing newer to give until the floor has passed.
+        if state.last_error is None and state.last_snapshot is not None:
+            wait = provider.min_poll_interval - (now - state.last_fetch_attempt)
+            if wait > 0:
+                self._set_toast(
+                    f"{provider.name} updates every "
+                    f"{provider.min_poll_interval:.0f}s — next refresh in {wait:.0f}s",
+                    seconds=3.0,
+                )
+                return
+        self._refresh(tab_name)
 
     def _needs_refresh(self, tab_name: str) -> bool:
         state = self.tabs[tab_name]
@@ -609,19 +639,19 @@ class App:
             new_tab = TAB_ORDER[(idx + delta) % len(TAB_ORDER)]
             if new_tab != self.active_tab:
                 self.active_tab = new_tab
-                if self.tabs[new_tab].last_snapshot is None:
+                if self._needs_refresh(new_tab):
                     self._refresh(new_tab)
             return True
         if ch in TAB_KEYS:
             new_tab = TAB_KEYS[ch]
             if new_tab != self.active_tab:
                 self.active_tab = new_tab
-                # trigger an immediate fetch if we've never loaded this tab
-                if self.tabs[new_tab].last_snapshot is None:
+                # fetch now if this tab is due (first visit, or stale)
+                if self._needs_refresh(new_tab):
                     self._refresh(new_tab)
                 return True
         if ch in ("r", "R"):
-            self._refresh(self.active_tab)
+            self._manual_refresh(self.active_tab)
             return True
         state = self.tabs[self.active_tab]
         if ch in ("j", KEY_DOWN):

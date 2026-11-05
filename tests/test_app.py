@@ -75,5 +75,64 @@ class TestUnexpectedProviderErrors(AppTestCase):
         self.assertIn("fetch error", "\n".join(self.frame()))
 
 
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class TestRateLimitsAndFloors(AppTestCase):
+    def setUp(self):
+        super().setUp()
+        self.clock = Clock()
+        patcher = mock.patch("terminex.app.time.monotonic", self.clock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.crypto = FakeProvider(floor=60.0)
+        self.app.tabs["crypto"].provider = self.crypto
+
+    def test_tab_switching_does_not_bypass_backoff(self):
+        self.crypto.error = RateLimitError("slow down", retry_after=60)
+        self.app._refresh("crypto")
+        for _ in range(5):
+            self.app._handle_key("1")
+            self.app._handle_key("2")
+        self.assertEqual(self.crypto.calls, 1)
+
+    def test_manual_refresh_respects_backoff(self):
+        self.crypto.error = RateLimitError("slow down", retry_after=60)
+        self.app._refresh("crypto")
+        self.clock.now += 20
+        self.app._handle_key("r")
+        self.assertEqual(self.crypto.calls, 1)
+        self.assertIn("40s", self.app._active_toast())
+
+    def test_manual_refresh_respects_the_provider_floor(self):
+        self.app._refresh("crypto")
+        self.clock.now += 15
+        self.app._handle_key("r")
+        self.assertEqual(self.crypto.calls, 1)
+        self.assertIn("45s", self.app._active_toast())
+
+    def test_manual_refresh_retries_after_an_ordinary_error(self):
+        self.crypto.error = ProviderError("could not reach fake.example")
+        self.app._refresh("crypto")
+        self.crypto.error = None
+        self.clock.now += 2
+        self.app._handle_key("r")
+        self.assertEqual(self.crypto.calls, 2)
+        self.assertIsNone(self.app.tabs["crypto"].last_error)
+
+    def test_scheduled_polling_waits_for_the_floor(self):
+        self.app._refresh("crypto")
+        self.clock.now += 59
+        self.assertFalse(self.app._needs_refresh("crypto"))
+        self.clock.now += 1
+        self.assertTrue(self.app._needs_refresh("crypto"))
+
+
 if __name__ == "__main__":
     unittest.main()
