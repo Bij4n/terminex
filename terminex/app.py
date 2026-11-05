@@ -113,6 +113,7 @@ TAB_LABELS = {
     "watchlist": "Watch",
 }
 SOURCE_TABS: list[str] = ["fx", "crypto", "commodity"]
+FX_USD_SERIES = "fx_usd"  # series key for FX in USD per unit
 # Map tab name → AssetClass for watchlist pins
 TAB_TO_ASSET_CLASS = {"fx": "fx", "crypto": "crypto", "commodity": "commodity"}
 
@@ -366,6 +367,12 @@ class App:
         # watchlist is a derived view and would double-count).
         if tab_name in SOURCE_TABS:
             self.series.extend_from_snapshot(tab_name, snap.quotes)
+            if tab_name == "fx":
+                # USD per unit at this snapshot's own pivot, for watchlist
+                # trends (the FX tab's series is units per base currency).
+                from .converter import fx_usd_per_unit
+                for code, usd in fx_usd_per_unit(snap).items():
+                    self.series.append(FX_USD_SERIES, code, usd)
             fires = self.alert_engine.evaluate(snap, tab_name)
             if fires:
                 self._handle_alert_fires(fires)

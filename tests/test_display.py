@@ -56,5 +56,21 @@ class TestRankColumn(unittest.TestCase):
         self.assertEqual(re.findall(r"│\s+(\d+) │ (JPY|EUR)", out), [("3", "JPY"), ("2", "EUR")])
 
 
+
+class TestWatchlistTrendSource(unittest.TestCase):
+    def test_fx_pins_draw_the_usd_series(self):
+        asked = []
+
+        def getter(asset, symbol):
+            asked.append((asset, symbol))
+            return [1.10, 1.12]
+
+        quotes = [Quote("EUR", "Euro", 1.12, "USD", meta={"source_tab": "fx", "source_label": "FX"})]
+        snap = Snapshot("fx", "USD", quotes, datetime.now(tz=timezone.utc))
+        out = _render(build_table(snap, is_watchlist=True, series_getter=getter))
+        self.assertEqual(asked, [("fx_usd", "EUR")])
+        self.assertIn("+1.82%", out)  # 1.10 → 1.12, no inversion
+
+
 if __name__ == "__main__":
     unittest.main()

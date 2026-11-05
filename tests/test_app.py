@@ -20,8 +20,9 @@ from terminex.quote import Quote, Snapshot
 class FakeProvider(Provider):
     name = "fake.example"
 
-    def __init__(self, asset_class="crypto", quotes=None, error=None, floor=0.0):
+    def __init__(self, asset_class="crypto", quotes=None, error=None, floor=0.0, quote_ccy="USD"):
         self.asset_class = asset_class
+        self.quote_ccy = quote_ccy
         self.quotes = quotes if quotes is not None else [Quote("BTC", "Bitcoin", 80000.0, "USD", 1.0)]
         self.error = error
         self.min_poll_interval = floor
@@ -31,7 +32,7 @@ class FakeProvider(Provider):
         self.calls += 1
         if self.error is not None:
             raise self.error
-        return Snapshot(self.asset_class, "USD", list(self.quotes),
+        return Snapshot(self.asset_class, self.quote_ccy, list(self.quotes),
                         datetime.now(tz=timezone.utc), provider_name=self.name)
 
 
@@ -132,6 +133,24 @@ class TestRateLimitsAndFloors(AppTestCase):
         self.assertFalse(self.app._needs_refresh("crypto"))
         self.clock.now += 1
         self.assertTrue(self.app._needs_refresh("crypto"))
+
+
+
+class TestWatchlistFxTrendNonUsdBase(AppTestCase):
+    def test_usd_series_recorded_per_snapshot(self):
+        fx = FakeProvider(asset_class="fx", quote_ccy="EUR", quotes=[
+            Quote("EUR", "Euro", 1.0, "EUR"), Quote("USD", "US Dollar", 1.10, "EUR"),
+            Quote("GBP", "Pound", 0.85, "EUR"),
+        ])
+        self.app.tabs["fx"].provider = fx
+        self.app._refresh("fx")
+        fx.quotes = [Quote("EUR", "Euro", 1.0, "EUR"), Quote("USD", "US Dollar", 1.12, "EUR"),
+                     Quote("GBP", "Pound", 0.85, "EUR")]
+        self.app._refresh("fx")
+        get = self.app.series.get
+        self.assertEqual(get("fx_usd", "USD"), [1.0])  # a dollar is always a dollar
+        self.assertEqual(get("fx_usd", "EUR"), [1.10, 1.12])
+        self.assertAlmostEqual(get("fx_usd", "GBP")[-1], 1.12 / 0.85)
 
 
 if __name__ == "__main__":

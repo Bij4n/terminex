@@ -124,11 +124,11 @@ def _trend_cell(q, asset: str, series_getter: SeriesGetter, is_watchlist: bool) 
         return render_sparkline(
             history, width=TREND_WIDTH, change_pct=q.meta.get("change_7d_pct")
         )
-    series = series_getter(asset, q.symbol)
     if is_watchlist and asset == "fx":
-        # Watchlist shows USD per unit; the FX tab's series is per-base rates.
-        series = [1.0 / v for v in series if v > 0]
-    return render_sparkline(series, width=TREND_WIDTH)
+        # Watchlist shows USD per unit; the FX tab's series is per-base
+        # rates, so FX pins use the USD series the app records per snapshot.
+        asset = "fx_usd"
+    return render_sparkline(series_getter(asset, q.symbol), width=TREND_WIDTH)
 
 
 # Columns that may be dropped to fit a narrow terminal, least useful first.
