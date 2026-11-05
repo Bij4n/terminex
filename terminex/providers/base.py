@@ -6,6 +6,7 @@ import math
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from importlib.metadata import PackageNotFoundError, version
 
 from ..quote import AssetClass, Snapshot
 
@@ -27,6 +28,16 @@ class RateLimitError(ProviderError):
 
 
 MAX_RETRY_AFTER = 3600.0
+
+
+def user_agent() -> str:
+    """Identify terminex honestly. Some public APIs (Yahoo) reject the
+    default python-requests agent outright."""
+    try:
+        ver = version("terminex")
+    except PackageNotFoundError:
+        ver = "dev"
+    return f"Mozilla/5.0 (compatible; terminex/{ver}; +https://github.com/Bij4n/terminex)"
 
 
 def finite_number(value: object) -> float | None:

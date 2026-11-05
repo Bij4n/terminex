@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import signal
+import sqlite3
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
@@ -25,9 +26,11 @@ from .help import render_filter_bar, render_help_panel
 from .keyboard import KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP, KeyboardListener
 from .statusbar import render_status_bar
 from .providers.base import Provider, ProviderError, RateLimitError
-from .providers.commodities_yahoo import CommoditiesYahoo
+from .providers.commodities_yahoo import HOSTS as YAHOO_HOSTS, CommoditiesYahoo
 from .providers.crypto_coincap import CryptoCoinCap
 from .providers.crypto_coingecko import CryptoCoinGecko
+from .providers.crypto_coinlore import CryptoCoinLore
+from .providers.fallback import FallbackProvider
 from .providers.fx_erapi import FxERApi
 from .alert_engine import AlertEngine, FireEvent
 from .providers.watchlist_agg import WatchlistAggregator
@@ -153,26 +156,63 @@ class TabState:
             )
 
 
+def _same_feed_rates(old: Snapshot, new: Snapshot) -> dict[str, float] | None:
+    """Previous prices for "Δ since last", only where the same feed served
+    both snapshots: after a switch the difference would be between feeds,
+    not a market move. Watchlist rows carry their own feed in meta."""
+    if old.provider_name != new.provider_name:
+        return None
+    feed = {q.symbol: q.meta.get("feed") for q in new.quotes}
+    return {
+        q.symbol: q.price
+        for q in old.quotes
+        if q.symbol in feed and q.meta.get("feed") == feed[q.symbol]
+    }
+
+
+def default_providers(config: Config) -> dict[str, Provider]:
+    """The data source for each source tab, chosen from the config."""
+    # Crypto: the keyless CoinGecko public API, with keyless CoinLore behind
+    # it. CoinCap needs a key; with one it leads the chain.
+    crypto_chain: list[Provider] = [
+        CryptoCoinGecko(key_hint=not config.coincap_api_key),
+        CryptoCoinLore(),
+    ]
+    if config.coincap_api_key:
+        crypto_chain.insert(0, CryptoCoinCap(api_key=config.coincap_api_key))
+    # Commodities: Yahoo serves the same API from two hosts.
+    commodities = FallbackProvider(*(CommoditiesYahoo(host=h) for h in YAHOO_HOSTS))
+    return {
+        "fx": FxERApi(base=config.base_currency),
+        "crypto": FallbackProvider(*crypto_chain),
+        "commodity": commodities,
+    }
+
+
 class App:
-    def __init__(self, config: Config, interval: float) -> None:
+    def __init__(
+        self,
+        config: Config,
+        interval: float,
+        *,
+        providers: dict[str, Provider] | None = None,
+        store: sqlite3.Connection | None = None,
+        console: Console | None = None,
+        keyboard: Callable[[], KeyboardListener] = KeyboardListener,
+    ) -> None:
+        """Everything with side effects can be passed in (tests do);
+        by default the app builds real providers, the on-disk store, a
+        terminal console and a stdin keyboard listener."""
         self.config = config
         self.interval = interval
         self.active_tab = (
             config.active_tab if config.active_tab in TAB_ORDER else "fx"
         )
-        # CoinCap v3 requires a key; fall back to the keyless CoinGecko
-        # public API when one isn't configured so the crypto tab works
-        # out of the box.
-        crypto_provider: Provider = (
-            CryptoCoinCap(api_key=config.coincap_api_key)
-            if config.coincap_api_key
-            else CryptoCoinGecko()
-        )
+        providers = providers or default_providers(config)
         self.tabs: dict[str, TabState] = {
-            "fx": TabState(FxERApi(base=config.base_currency)),
-            "crypto": TabState(crypto_provider),
-            "commodity": TabState(CommoditiesYahoo()),
+            name: TabState(providers[name]) for name in SOURCE_TABS
         }
+        self._keyboard_factory = keyboard
         self.watchlist = load_watchlist()
         self.tabs["watchlist"] = TabState(
             WatchlistAggregator(
@@ -180,9 +220,11 @@ class App:
                 self._lookup_pinned_quote,
                 fx_usd_price=self._fx_usd_price,
                 source_failed=self._source_failed,
+                source_loaded=lambda tab: self.tabs[tab].last_snapshot is not None,
+                source_feed=self._source_feed,
             )
         )
-        self.console = Console()
+        self.console = console or Console()
         self.should_quit = False
         self._toast: tuple[str, float] | None = None  # (message, expires_at)
         self.show_help = False
@@ -193,9 +235,11 @@ class App:
         self.converter_error: str | None = None
         self.alert_draft: dict | None = None  # active alert-creation modal state
         self.alert_list_delete_buffer: str = ""
-        self.store, store_notices = open_store()
-        for notice in store_notices:
-            print(f"terminex: {notice}", file=sys.stderr)
+        if store is None:
+            store, store_notices = open_store()
+            for notice in store_notices:
+                print(f"terminex: {notice}", file=sys.stderr)
+        self.store = store
         self.alert_engine = AlertEngine(self.store)
         self.series = SeriesStore(db=self.store)
         self.show_sparklines = False
@@ -212,6 +256,10 @@ class App:
             if q.symbol == symbol:
                 return q
         return None
+
+    def _source_feed(self, tab_name: str) -> str | None:
+        snap = self.tabs[tab_name].last_snapshot
+        return snap.provider_name if snap is not None else None
 
     def _alert_base(self, asset_class: str) -> str:
         """Base currency an alert's threshold is quoted in."""
@@ -386,9 +434,12 @@ class App:
                 f"({type(exc).__name__}: {exc})"
             )
             return
-        # rotate previous → current
-        if state.last_snapshot is not None:
-            state.previous_rates = state.last_snapshot.as_rate_map()
+        # rotate previous → current, keeping only prices from the same feed
+        state.previous_rates = (
+            _same_feed_rates(state.last_snapshot, snap)
+            if state.last_snapshot is not None
+            else None
+        )
         state.last_snapshot = snap
         state.last_error = None
         # Append prices to per-symbol series (source tabs only — the
@@ -440,10 +491,9 @@ class App:
         now = time.monotonic()
         if now < state.backoff_until:
             wait = state.backoff_until - now
-            self._set_toast(
-                f"{provider.name} is rate limited — retrying in {wait:.0f}s",
-                seconds=3.0,
-            )
+            # Don't name a feed: in a fallback chain the serving feed's name
+            # isn't necessarily the one that is limited (the error says).
+            self._set_toast(f"Rate limited — retrying in {wait:.0f}s", seconds=3.0)
             return
         # After an error, retry at once. After a success, a provider with a
         # poll floor has nothing newer to give until the floor has passed.
@@ -1055,7 +1105,7 @@ class App:
         # eager first fetch for the active tab
         self._refresh(self.active_tab)
 
-        kb = KeyboardListener()
+        kb = self._keyboard_factory()
         try:
             kb.start()
             with Live(

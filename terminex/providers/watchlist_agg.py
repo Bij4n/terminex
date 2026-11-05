@@ -18,6 +18,8 @@ from .base import Provider
 QuoteLookup = Callable[[AssetClass, str], Quote | None]
 FxUsdPrice = Callable[[str], float | None]
 SourceFailed = Callable[[AssetClass], bool]
+SourceLoaded = Callable[[AssetClass], bool]
+SourceFeed = Callable[[AssetClass], str | None]
 
 _TAB_LABELS: dict[AssetClass, str] = {
     "fx": "FX",
@@ -36,6 +38,8 @@ class WatchlistAggregator(Provider):
         lookup: QuoteLookup,
         fx_usd_price: FxUsdPrice | None = None,
         source_failed: SourceFailed | None = None,
+        source_loaded: SourceLoaded | None = None,
+        source_feed: SourceFeed | None = None,
     ) -> None:
         self.watchlist = watchlist
         self.lookup = lookup
@@ -45,6 +49,13 @@ class WatchlistAggregator(Provider):
         # True when a source tab has failed and has nothing to show, so its
         # pins read "unavailable" instead of "loading…" forever.
         self.source_failed = source_failed
+        # True when a source tab has data; a pin it doesn't list (e.g. after
+        # a switch to a fallback feed with a different top 25) is then
+        # unavailable rather than still loading.
+        self.source_loaded = source_loaded
+        # The feed serving each source tab, recorded per row so "Δ since
+        # last" can skip rows whose feed changed between snapshots.
+        self.source_feed = source_feed
 
     def fetch(self) -> Snapshot:
         quotes: list[Quote] = []
@@ -59,16 +70,30 @@ class WatchlistAggregator(Provider):
                 else (pin.asset_class, pin.symbol)
             )
             extra: dict = {"series_key": series_key}
+            if self.source_feed is not None:
+                extra["feed"] = self.source_feed(pin.asset_class)
             if q is not None and pin.asset_class == "fx":
                 price = self.fx_usd_price(q.symbol) if self.fx_usd_price else None
                 extra["fx_rate"] = q.price
             if q is None or price is None:
                 label = _TAB_LABELS[pin.asset_class]
                 failed = bool(self.source_failed and self.source_failed(pin.asset_class))
+                absent = (
+                    q is None
+                    and not failed
+                    and bool(self.source_loaded and self.source_loaded(pin.asset_class))
+                )
+                if failed:
+                    name = f"({label} unavailable)"
+                elif absent:
+                    name = f"(not in current {label} feed)"
+                else:
+                    name = f"(loading {label}…)"
+                failed = failed or absent
                 quotes.append(
                     Quote(
                         symbol=pin.symbol,
-                        name=f"({label} unavailable)" if failed else f"(loading {label}…)",
+                        name=name,
                         price=0.0,
                         quote_ccy="USD",
                         change_24h_pct=None,

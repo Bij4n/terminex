@@ -95,6 +95,11 @@ class CryptoCoinCap(Provider):
                 )
             )
 
+        if not quotes:
+            # An empty table would look like a quiet market; say the feed
+            # sent nothing usable (usually a format change upstream).
+            raise ProviderError(f"{self.name} returned no usable prices")
+
         return Snapshot(
             asset_class="crypto",
             quote_ccy="USD",

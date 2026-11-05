@@ -13,7 +13,6 @@ Stooq's CSV endpoint, used up to 0.4.0, was removed in 2026.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version
 
 import requests
 
@@ -25,9 +24,13 @@ from .base import (
     RateLimitError,
     finite_number,
     parse_retry_after,
+    user_agent,
 )
 
-API_URL = "https://query1.finance.yahoo.com/v8/finance/spark"
+# Yahoo serves the same API from two hosts; the app falls back from the
+# first to the second (see providers/fallback.py).
+HOSTS = ("query1.finance.yahoo.com", "query2.finance.yahoo.com")
+SPARK_PATH = "/v8/finance/spark"
 TIMEOUT = 10.0
 DEFAULT_RETRY_AFTER = 120.0
 
@@ -50,44 +53,36 @@ SYMBOLS: list[tuple[str, str, str, bool]] = [
 ]
 
 
-def _user_agent() -> str:
-    try:
-        ver = version("terminex")
-    except PackageNotFoundError:
-        ver = "dev"
-    return (
-        f"Mozilla/5.0 (compatible; terminex/{ver}; "
-        "+https://github.com/Bij4n/terminex)"
-    )
-
-
 def display_symbol(yahoo_symbol: str) -> str:
     """``GC=F`` → ``GC.F``, the name pins and alerts have always used."""
     return yahoo_symbol.replace("=", ".")
 
 
 class CommoditiesYahoo(Provider):
-    name = "finance.yahoo.com"
     asset_class = "commodity"
     # Futures quotes are delayed ~10 minutes; there is nothing to gain from
     # polling the unofficial endpoint more often than this.
     min_poll_interval: float = 120.0
 
     def __init__(
-        self, symbols: list[tuple[str, str, str, bool]] | None = None
+        self,
+        symbols: list[tuple[str, str, str, bool]] | None = None,
+        host: str = HOSTS[0],
     ) -> None:
         self.symbols = symbols or SYMBOLS
+        self.host = host
+        self.name = host
 
     def fetch(self) -> Snapshot:
         try:
             resp = requests.get(
-                API_URL,
+                f"https://{self.host}{SPARK_PATH}",
                 params={
                     "symbols": ",".join(sym for sym, *_ in self.symbols),
                     "range": "7d",
                     "interval": "1h",
                 },
-                headers={"User-Agent": _user_agent()},
+                headers={"User-Agent": user_agent()},
                 timeout=TIMEOUT,
             )
         except requests.RequestException as exc:

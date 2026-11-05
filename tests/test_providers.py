@@ -163,6 +163,61 @@ class TestCoinCapPayloads(unittest.TestCase):
         self.assertIsNone(snap.provider_time)
 
 
+class TestEmptyResultsAreErrors(unittest.TestCase):
+    def test_every_provider_rejects_an_empty_result(self):
+        from terminex.providers.crypto_coincap import CryptoCoinCap
+        from terminex.providers.fx_erapi import FxERApi
+        cases = [
+            ("crypto_coingecko", CryptoCoinGecko(), []),
+            ("crypto_coincap", CryptoCoinCap(api_key="k"), {"data": []}),
+            ("fx_erapi", FxERApi(), {"result": "success", "rates": {"XXX": 1.0}}),
+            ("commodities_yahoo", CommoditiesYahoo(), {}),
+        ]
+        for module, provider, payload in cases:
+            with self.subTest(provider=provider.name):
+                with mock.patch(f"terminex.providers.{module}.requests.get",
+                                return_value=_response(200, payload)):
+                    with self.assertRaises(ProviderError):
+                        provider.fetch()
+
+
+class TestCoinLore(unittest.TestCase):
+    def _fetch(self, payload, status=200, headers=None):
+        from terminex.providers.crypto_coinlore import CryptoCoinLore
+        with mock.patch("terminex.providers.crypto_coinlore.requests.get",
+                        return_value=_response(status, payload, headers)) as get:
+            return CryptoCoinLore().fetch(), get
+
+    def test_parses_string_numbers_rank_and_changes(self):
+        snap, get = self._fetch({"data": [
+            {"symbol": "BTC", "name": "Bitcoin", "rank": 1, "price_usd": "80528.59",
+             "percent_change_24h": "3.36", "percent_change_7d": "-0.62"},
+            {"symbol": "ETH", "name": "Ethereum", "rank": 2, "price_usd": "nan"},
+            "junk",
+        ]})
+        self.assertEqual([q.symbol for q in snap.quotes], ["BTC"])
+        btc = snap.quotes[0]
+        self.assertEqual((btc.price, btc.change_24h_pct), (80528.59, 3.36))
+        self.assertEqual(btc.meta, {"rank": 1, "change_7d_pct": -0.62})
+        self.assertIn("terminex", get.call_args.kwargs["headers"]["User-Agent"])
+
+    def test_rate_limit_and_empty(self):
+        with self.assertRaises(RateLimitError):
+            self._fetch(None, status=429, headers={"Retry-After": "10"})
+        with self.assertRaises(ProviderError):
+            self._fetch({"data": []})
+
+
+class TestYahooHosts(unittest.TestCase):
+    def test_host_sets_url_and_name(self):
+        provider = CommoditiesYahoo(host="query2.finance.yahoo.com")
+        self.assertEqual(provider.name, "query2.finance.yahoo.com")
+        with mock.patch("terminex.providers.commodities_yahoo.requests.get",
+                        return_value=_response(200, SPARK)) as get:
+            provider.fetch()
+        self.assertTrue(get.call_args.args[0].startswith("https://query2.finance.yahoo.com/"))
+
+
 class TestCoinGeckoPayloads(unittest.TestCase):
     def test_non_finite_values_are_dropped(self):
         resp = _response(200, [
@@ -196,6 +251,14 @@ class TestRetryAfter(unittest.TestCase):
         self.assertEqual(parse_retry_after("nan", default=60), 60.0)
         self.assertEqual(parse_retry_after("0", default=60), 1.0)
         self.assertEqual(parse_retry_after("999999", default=60), 3600.0)
+
+    def test_coingecko_suggests_a_coincap_key_only_without_one(self):
+        resp = lambda: _response(429, None, {"Retry-After": "30"})  # noqa: E731
+        for key_hint, expect in ((True, True), (False, False)):
+            with mock.patch("terminex.providers.crypto_coingecko.requests.get", return_value=resp()):
+                with self.assertRaises(RateLimitError) as ctx:
+                    CryptoCoinGecko(key_hint=key_hint).fetch()
+            self.assertEqual("TERMINEX_COINCAP_KEY" in str(ctx.exception), expect)
 
     def test_coingecko_survives_a_date_header(self):
         resp = _response(429, None, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})

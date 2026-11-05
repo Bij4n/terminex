@@ -39,24 +39,27 @@ Released 2026-11-04. See `CHANGELOG.md` for the full list.
   fire times in local time; units shown when creating one.
 - Python 3.13 and 3.14 in CI.
 
-## Phase 2: survive a dead feed
+## Phase 2: survive a dead feed (0.6.0)
 
 Goal: the next provider failure is caught by us, not by users.
 
-- **Provider canary.** A scheduled GitHub Actions job runs each provider
-  against the live API daily and opens an issue when one fails or changes
-  shape.
-- **Recorded fixtures for every provider.** Parse tests run against saved
-  real responses, so a format change shows up as a failing test with a diff.
-- **Real fallbacks.** Today terminex uses CoinCap when a key is set and
-  CoinGecko otherwise; neither takes over when the other fails. Add
-  failure-triggered fallback for crypto, and find a second keyless (or
-  free-key) commodities source so the tab has somewhere to go when Yahoo
-  blocks it.
-- **Injectable app parts.** Let `App` accept its providers, store and
-  keyboard directly. The test suite already builds an `App` with fake
-  providers in a temporary home; constructor injection would make that the
-  supported way.
+Done in 0.6.0:
+
+- **Provider canary.** A daily GitHub Actions job checks every feed against
+  its live API, fallbacks included, and keeps one issue open per failing
+  feed until it recovers.
+- **Recorded fixtures.** Provider tests parse saved real responses, so a
+  format change shows up as a failing test.
+- **Fallbacks.** Crypto: CoinGecko → CoinLore, with CoinCap first when a key
+  is set. Commodities: Yahoo's `query1` host → `query2`.
+- **Injectable app parts.** `App` takes its providers, store, console and
+  keyboard, and the main loop has tests.
+
+Still open:
+
+- **An independent commodities source.** No keyless feed covering all 14
+  futures was found; both fallbacks are Yahoo. Candidates need a key
+  (FRED: daily, no metals) or cover only metals (gold-api.com).
 
 ## Phase 3: use it from scripts and make it yours
 

@@ -51,11 +51,13 @@ class AppTestCase(unittest.TestCase):
         }
         self.env = mock.patch.dict(os.environ, env)
         self.env.start()
-        self.app = App(config=Config(active_tab="crypto"), interval=10.0)
-        self.app.console = Console(file=io.StringIO(), width=self.width,
-                                   height=self.height, color_system=None)
-        for name, asset in (("fx", "fx"), ("crypto", "crypto"), ("commodity", "commodity")):
-            self.app.tabs[name].provider = FakeProvider(asset_class=asset)
+        self.app = App(
+            config=Config(active_tab="crypto"),
+            interval=10.0,
+            providers={t: FakeProvider(asset_class=t) for t in ("fx", "crypto", "commodity")},
+            console=Console(file=io.StringIO(), width=self.width,
+                            height=self.height, color_system=None),
+        )
 
     def tearDown(self):
         self.app.store.close()
@@ -391,6 +393,74 @@ class TestHelpAt80x24(AppTestCase):
 
 
 
+class TestFallbackChainInTheApp(AppTestCase):
+    """A FallbackProvider driven through the app's refresh and backoff."""
+
+    def setUp(self):
+        super().setUp()
+        from terminex.providers.fallback import FallbackProvider
+        self.clock = Clock()
+        for target in ("terminex.app.time.monotonic", "terminex.providers.fallback.time.monotonic"):
+            patcher = mock.patch(target, self.clock)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.gecko = FakeProvider(floor=60.0)
+        self.gecko.name = "coingecko.com"
+        self.lore = FakeProvider(floor=60.0)
+        self.lore.name = "coinlore.com"
+        self.app.tabs["crypto"].provider = FallbackProvider(self.gecko, self.lore)
+
+    def test_rate_limited_last_feed_does_not_freeze_the_tab(self):
+        self.gecko.error = ProviderError("coingecko.com returned HTTP 503")
+        self.lore.error = RateLimitError("coinlore.com rate limited", retry_after=1800)
+        self.app._refresh("crypto")
+        self.clock.now += 299
+        self.assertFalse(self.app._needs_refresh("crypto"))  # CoinGecko rests 5 min…
+        self.clock.now += 1
+        self.assertTrue(self.app._needs_refresh("crypto"))   # …not the 30 min window
+
+    def test_backoff_toast_does_not_blame_the_wrong_feed(self):
+        self.gecko.error = RateLimitError("coingecko.com rate limited", retry_after=100)
+        self.lore.error = RateLimitError("coinlore.com rate limited", retry_after=200)
+        self.app._refresh("crypto")
+        self.app._handle_key("r")
+        # The serving feed's name isn't necessarily the one that is limited.
+        self.assertRegex(self.app._active_toast(), r"^Rate limited — retrying in \d+s$")
+
+    def test_delta_column_kept_while_the_same_feed_serves(self):
+        self.app._refresh("crypto")
+        self.clock.now += 60
+        self.app._refresh("crypto")
+        self.assertEqual(self.app.tabs["crypto"].previous_rates, {"BTC": 80000.0})
+
+    def test_watchlist_delta_resets_for_rows_whose_feed_changed(self):
+        self.app.watchlist.toggle("crypto", "BTC")
+        self.app.active_tab = "watchlist"
+        self.app._refresh("crypto")
+        self.app._refresh("watchlist")                       # BTC via CoinGecko
+        self.gecko.error = ProviderError("down")
+        self.lore.quotes = [Quote("BTC", "Bitcoin", 80400.0, "USD", 1.0)]
+        self.clock.now += 60
+        self.app._refresh("crypto")                          # now CoinLore
+        self.app._refresh("watchlist")
+        self.assertNotIn("BTC", self.app.tabs["watchlist"].previous_rates or {})
+
+    def test_pin_missing_from_the_serving_feed_says_so(self):
+        self.app.watchlist.toggle("crypto", "DOGE")         # not in the fake feed
+        self.app._refresh("crypto")
+        self.app._refresh("watchlist")
+        row = self.app.tabs["watchlist"].last_snapshot.quotes[0]
+        self.assertEqual(row.name, "(not in current Crypto feed)")
+
+    def test_delta_column_resets_when_the_serving_feed_changes(self):
+        self.app._refresh("crypto")                          # served by CoinGecko
+        self.gecko.error = ProviderError("down")
+        self.lore.quotes = [Quote("BTC", "Bitcoin", 80100.0, "USD", 1.0)]
+        self.clock.now += 60
+        self.app._refresh("crypto")                          # now CoinLore
+        self.assertIsNone(self.app.tabs["crypto"].previous_rates)
+
+
 class TestWatchlistKeepsPolling(AppTestCase):
     """Staying on the watchlist must keep its pinned feeds fresh."""
 
@@ -434,6 +504,71 @@ class TestWatchlistKeepsPolling(AppTestCase):
         self.clock.now += 300
         self.app._poll()
         self.assertEqual(crypto.calls, 0)
+
+
+
+class FakeKeyboard:
+    """Stands in for KeyboardListener: replays scripted keys."""
+
+    def __init__(self, keys=()):
+        self.keys = list(keys)
+        self.started = self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def drain(self):
+        while self.keys:
+            yield self.keys.pop(0)
+
+
+class TestInjection(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = mock.patch.dict(os.environ, {
+            "HOME": self.tmp.name,
+            "XDG_CONFIG_HOME": os.path.join(self.tmp.name, "config"),
+            "XDG_DATA_HOME": os.path.join(self.tmp.name, "data"),
+        })
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def test_default_providers_follow_the_config(self):
+        from terminex.app import default_providers
+        self.assertEqual(default_providers(Config())["crypto"].name, "coingecko.com")
+        self.assertEqual(default_providers(Config(coincap_api_key="k"))["crypto"].name, "coincap.io")
+        self.assertEqual(default_providers(Config(base_currency="EUR"))["fx"].base, "EUR")
+
+    def test_app_uses_what_it_is_given(self):
+        from terminex.store import connect_memory
+        providers = {t: FakeProvider(asset_class=t) for t in ("fx", "crypto", "commodity")}
+        store = connect_memory()
+        console = Console(file=io.StringIO(), width=100, height=30)
+        app = App(Config(), 10.0, providers=providers, store=store, console=console)
+        self.assertIs(app.tabs["crypto"].provider, providers["crypto"])
+        self.assertIs(app.store, store)
+        self.assertIs(app.console, console)
+        store.close()
+
+    def test_main_loop_quits_on_q_and_cleans_up(self):
+        from terminex.store import connect_memory
+        keyboard = FakeKeyboard(["j", "q"])
+        app = App(
+            Config(active_tab="crypto"), 10.0,
+            providers={t: FakeProvider(asset_class=t) for t in ("fx", "crypto", "commodity")},
+            store=connect_memory(),
+            console=Console(file=io.StringIO(), width=100, height=30),
+            keyboard=lambda: keyboard,
+        )
+        self.assertEqual(app.run(), 0)
+        self.assertTrue(keyboard.started and keyboard.stopped)
+        self.assertIn("BTC", app.console.file.getvalue())
 
 
 if __name__ == "__main__":
