@@ -9,8 +9,9 @@ before it counts.
     python scripts/canary.py --manage-issues       # also open/close issues (needs gh + GH_TOKEN)
     python scripts/canary.py --simulate-failure coingecko.com   # test the issue flow
 
-Exit status is 1 if any feed is failing. A feed that is only rate limited
-(likely the CI runner's shared address) is reported but is not a failure.
+Exit status is 1 if any feed is failing or, with --manage-issues, if a gh
+call failed. A feed that is only rate limited (likely the CI runner's
+shared address) is reported but is not a failure.
 Runs daily from .github/workflows/canary.yml.
 """
 
@@ -194,14 +195,16 @@ def main(argv: list[str] | None = None) -> int:
         run_check(check, simulate_failure=check.provider.name == args.simulate_failure)
         for check in default_checks()
     ]
+    gh_errors = manage_issues(results) if args.manage_issues else []
     report = _report(results)
+    if gh_errors:
+        report += "\n\n**Issue updates failed:**\n\n" + "\n".join(f"- {e}" for e in gh_errors)
     print(report)
+    for error in gh_errors:
+        print(f"gh error: {error}", file=sys.stderr)
     if args.summary:
         with open(args.summary, "a", encoding="utf-8") as f:
             f.write("## terminex feed canary\n\n" + report + "\n")
-    gh_errors = manage_issues(results) if args.manage_issues else []
-    for error in gh_errors:
-        print(f"gh error: {error}", file=sys.stderr)
     return 1 if gh_errors or any(r.status == "failing" for r in results) else 0
 
 

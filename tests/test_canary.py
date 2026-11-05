@@ -155,5 +155,22 @@ class TestIssues(unittest.TestCase):
         self.assertEqual(gh.actions(), [])
 
 
+
+class TestMain(unittest.TestCase):
+    def test_summary_includes_gh_errors_and_exit_is_nonzero(self):
+        import tempfile
+        from unittest import mock
+        healthy = canary.Check(Scripted("feed.com", snap(GOOD)), min_rows=20, required={"BTC"})
+        with tempfile.NamedTemporaryFile("r+", suffix=".md") as summary, \
+                mock.patch.object(canary, "default_checks", return_value=[healthy]), \
+                mock.patch.object(canary, "manage_issues", return_value=["feed.com: HTTP 403"]), \
+                mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            code = canary.main(["--manage-issues", "--summary", summary.name])
+            text = open(summary.name).read()
+        self.assertEqual(code, 1)
+        self.assertIn("Issue updates failed", text)
+        self.assertIn("HTTP 403", text)
+
+
 if __name__ == "__main__":
     unittest.main()

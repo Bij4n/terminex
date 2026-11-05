@@ -124,7 +124,7 @@ terminex --tab commodity > commodities.txt
 | Crypto      | `rest.coincap.io` (only if a key is set) → `coingecko.com` → `coinlore.com` | CoinCap: free key | top 25 by market cap; 7-day history from CoinGecko |
 | Commodities | `query1.finance.yahoo.com` → `query2.finance.yahoo.com`    | no               | 14 futures, ~10 min delayed            |
 
-When a feed fails, terminex serves the tab from the next one in its row and the caption under the table says so (for example "via coinlore.com (coingecko.com unavailable)"). A feed that fails rests for a few minutes (or as long as its rate limit asks) before it is tried again, and terminex switches back when it recovers. If every feed fails at once, terminex assumes the connection dropped and retries the first feed within 30 seconds.
+When a feed fails, terminex serves the tab from the next one in its row and the caption under the table says so (for example "via coinlore.com (coingecko.com unavailable)"). A feed that fails rests for a few minutes (or as long as its rate limit asks) before it is tried again, and terminex switches back when it recovers. If no feed answers at all, terminex assumes the connection dropped and retries within 30 seconds (or your refresh interval, if longer).
 
 The commodities feed uses Yahoo Finance's public but undocumented spark endpoint, served from two hosts. If Yahoo changes or limits it, the Commodities tab shows an error and the other tabs keep working.
 
