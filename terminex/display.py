@@ -271,23 +271,33 @@ def build_table(
     return table
 
 
-def fit_hidden(build: Callable[[frozenset[str]], Table], console: Console) -> frozenset[str]:
-    """Fewest optional columns to drop so the table fits ``console.width``."""
+def fit_hidden(
+    build: Callable[[frozenset[str]], Table], console: Console
+) -> tuple[frozenset[str], int]:
+    """Fewest optional columns to drop so the table fits ``console.width``.
+
+    Returns ``(hidden, width)``: the natural width of the table with those
+    columns hidden. If even the essential columns don't fit, ``width`` is
+    larger than the console and the caller should not render the table
+    (Rich would truncate cells, prices included).
+    """
     # Measure the natural width: Measurement clamps to options.max_width.
     unbounded = console.options.update_width(10_000)
     hidden: frozenset[str] = frozenset()
+    width = 0
     for col in (None, *_DROP_ORDER):
         if col is not None:
             hidden = hidden | {col}
         width = Measurement.get(console, unbounded, build(hidden)).maximum
         if width <= console.width:
             break
-    return hidden
+    return hidden, width
 
 
 def fit_table(build: Callable[[frozenset[str]], Table], console: Console) -> Table:
     """Build the widest table that fits the console (see ``fit_hidden``)."""
-    return build(fit_hidden(build, console))
+    hidden, _ = fit_hidden(build, console)
+    return build(hidden)
 
 
 def scroll_offset(selected: int, offset: int, visible: int, total: int) -> int:

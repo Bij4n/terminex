@@ -441,6 +441,11 @@ class App:
     def _render(self):
         state = self.tabs[self.active_tab]
         header = self._header()
+        status_line = self._build_status_line(state)
+        # Header and status line wrap on narrow terminals: measure them.
+        chrome_lines = (
+            self._line_count(header) + self._line_count(status_line) + 2
+        )
 
         is_watchlist_tab = self.active_tab == "watchlist"
         empty_watchlist = is_watchlist_tab and not self.watchlist.pins
@@ -501,7 +506,9 @@ class App:
                         ranks=ranks,
                     )
 
-                body = self._fit_to_terminal(build, state, len(sorted_quotes))
+                body = self._fit_to_terminal(
+                    build, state, len(sorted_quotes), chrome_lines
+                )
         elif state.last_error is not None:
             body = state_panel(
                 state.last_error,
@@ -546,23 +553,39 @@ class App:
                 ),
             )
 
-        status_line = self._build_status_line(state)
         return Group(header, Text(""), body, Text(""), status_line)
 
-    # Lines around the table: tab header, blank, blank, status line.
-    _CHROME_LINES = 4
+    def _line_count(self, renderable) -> int:
+        console = self.console
+        return len(console.render_lines(renderable, console.options))
 
-    def _fit_to_terminal(self, build, state: TabState, total: int):
+    def _too_small(self, need_width: int, need_height: int):
+        from . import theme
+        size = self.console.size
+        return Text(
+            f"Terminal too small for this table ({size.width}×{size.height}). "
+            f"Make it at least {need_width}×{need_height}.",
+            style=theme.WARN,
+        )
+
+    def _fit_to_terminal(self, build, state: TabState, total: int, chrome_lines: int):
         """Drop columns to fit the width, then window rows to fit the height.
 
         Rows are one line each (every column is no_wrap), so the number of
-        rows that fit is the line budget minus the table's own chrome.
+        rows that fit is the line budget minus the table's own chrome. When
+        not even the essential columns or a single row fit, show a message
+        rather than a truncated or cropped table.
         """
         console = self.console
-        hidden = fit_hidden(build, console)
-        budget = console.size.height - self._CHROME_LINES
+        size = console.size
+        hidden, width = fit_hidden(build, console)
         table = build(hidden)
-        lines = len(console.render_lines(table, console.options))
+        lines = self._line_count(table)
+        table_chrome = lines - total
+        min_height = chrome_lines + table_chrome + 2  # one row + a scroll caption
+        if width > size.width or (lines > size.height - chrome_lines and size.height < min_height):
+            return self._too_small(max(width, size.width), max(min_height, size.height))
+        budget = size.height - chrome_lines
         if lines <= budget or total == 0:
             state.scroll_offset = 0
             return table
@@ -573,7 +596,7 @@ class App:
             )
             rows = slice(state.scroll_offset, state.scroll_offset + visible)
             table = build(hidden, rows)
-            excess = len(console.render_lines(table, console.options)) - budget
+            excess = self._line_count(table) - budget
             if excess <= 0 or visible == 1:
                 break
             visible = max(1, visible - excess)
@@ -921,9 +944,17 @@ class App:
                 refresh_per_second=8,
                 screen=False,
             ) as live:
+                size = self.console.size
                 while not self.should_quit:
                     time.sleep(0.1)
                     dirty = False
+                    if self.console.size != size:
+                        # The terminal rewraps old output on resize, which
+                        # leaves fragments above the live area: clear and
+                        # redraw at the new size.
+                        size = self.console.size
+                        self.console.clear()
+                        dirty = True
                     for ch in kb.drain():
                         if self._handle_key(ch):
                             dirty = True

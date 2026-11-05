@@ -153,5 +153,82 @@ class TestWatchlistFxTrendNonUsdBase(AppTestCase):
         self.assertAlmostEqual(get("fx_usd", "GBP")[-1], 1.12 / 0.85)
 
 
+
+def _coins(n=25):
+    return [
+        Quote(f"C{i:02d}", f"Coin number {i}", 80595.0 - i, "USD", 4.52,
+              meta={"rank": i + 1, "history": [70000.0 + j * 50 for j in range(168)],
+                    "change_7d_pct": 0.78})
+        for i in range(n)
+    ]
+
+
+class FrameSizeMixin:
+    """Render a whole frame at a given terminal size and check it fits."""
+
+    def setUp(self):
+        super().setUp()
+        self.app.tabs["crypto"].provider = FakeProvider(quotes=_coins())
+        self.app._refresh("crypto")
+        self.app.show_sparklines = True
+
+    def assert_fits(self, lines):
+        self.assertLessEqual(len(lines), self.height, "\n".join(lines))
+        self.assertTrue(all(len(l) <= self.width for l in lines))
+
+
+class TestFrame120x36(FrameSizeMixin, AppTestCase):
+    width, height = 120, 36
+
+    def test_everything_shows(self):
+        lines = self.frame()
+        self.assert_fits(lines)
+        text = "\n".join(lines)
+        self.assertIn("Coin number 0", text)
+        self.assertIn("? for keys", text)
+
+
+class TestFrame80x24(FrameSizeMixin, AppTestCase):
+    width, height = 80, 24
+
+    def test_fits_with_whole_prices_and_status(self):
+        self.app.tabs["crypto"].selected_index = 24
+        lines = self.frame()
+        self.assert_fits(lines)
+        text = "\n".join(lines)
+        self.assertIn("80,571.00", text)          # row 25, scrolled into view
+        self.assertIn("? for keys", lines[-1])
+        self.assertNotIn("…", text)
+
+
+class TestFrame40x24(FrameSizeMixin, AppTestCase):
+    width, height = 40, 24
+
+    def test_wrapped_header_and_status_still_fit(self):
+        lines = self.frame()
+        self.assert_fits(lines)
+        self.assertNotIn("80,5…", "\n".join(lines))
+
+
+class TestFrameTooShort(FrameSizeMixin, AppTestCase):
+    width, height = 60, 9
+
+    def test_too_small_message_instead_of_a_cropped_table(self):
+        lines = self.frame()
+        self.assert_fits(lines)
+        self.assertIn("too small", "\n".join(lines))
+
+
+class TestFrameTooNarrow(FrameSizeMixin, AppTestCase):
+    width, height = 28, 24
+
+    def test_too_small_message_instead_of_truncated_prices(self):
+        lines = self.frame()
+        self.assert_fits(lines)
+        text = "\n".join(lines)
+        self.assertIn("too small", text)
+        self.assertNotIn("80,5…", text)
+
+
 if __name__ == "__main__":
     unittest.main()
