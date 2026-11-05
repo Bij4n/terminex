@@ -156,6 +156,20 @@ class TabState:
             )
 
 
+def _same_feed_rates(old: Snapshot, new: Snapshot) -> dict[str, float] | None:
+    """Previous prices for "Δ since last", only where the same feed served
+    both snapshots: after a switch the difference would be between feeds,
+    not a market move. Watchlist rows carry their own feed in meta."""
+    if old.provider_name != new.provider_name:
+        return None
+    feed = {q.symbol: q.meta.get("feed") for q in new.quotes}
+    return {
+        q.symbol: q.price
+        for q in old.quotes
+        if q.symbol in feed and q.meta.get("feed") == feed[q.symbol]
+    }
+
+
 def default_providers(config: Config) -> dict[str, Provider]:
     """The data source for each source tab, chosen from the config."""
     # Crypto: the keyless CoinGecko public API, with keyless CoinLore behind
@@ -207,6 +221,7 @@ class App:
                 fx_usd_price=self._fx_usd_price,
                 source_failed=self._source_failed,
                 source_loaded=lambda tab: self.tabs[tab].last_snapshot is not None,
+                source_feed=self._source_feed,
             )
         )
         self.console = console or Console()
@@ -241,6 +256,10 @@ class App:
             if q.symbol == symbol:
                 return q
         return None
+
+    def _source_feed(self, tab_name: str) -> str | None:
+        snap = self.tabs[tab_name].last_snapshot
+        return snap.provider_name if snap is not None else None
 
     def _alert_base(self, asset_class: str) -> str:
         """Base currency an alert's threshold is quoted in."""
@@ -415,14 +434,12 @@ class App:
                 f"({type(exc).__name__}: {exc})"
             )
             return
-        # rotate previous → current; after a switch to another feed the
-        # difference would be between feeds, not a market move
-        if state.last_snapshot is not None and (
-            state.last_snapshot.provider_name == snap.provider_name
-        ):
-            state.previous_rates = state.last_snapshot.as_rate_map()
-        else:
-            state.previous_rates = None
+        # rotate previous → current, keeping only prices from the same feed
+        state.previous_rates = (
+            _same_feed_rates(state.last_snapshot, snap)
+            if state.last_snapshot is not None
+            else None
+        )
         state.last_snapshot = snap
         state.last_error = None
         # Append prices to per-symbol series (source tabs only — the

@@ -427,6 +427,31 @@ class TestFallbackChainInTheApp(AppTestCase):
         # The serving feed's name isn't necessarily the one that is limited.
         self.assertRegex(self.app._active_toast(), r"^Rate limited — retrying in \d+s$")
 
+    def test_delta_column_kept_while_the_same_feed_serves(self):
+        self.app._refresh("crypto")
+        self.clock.now += 60
+        self.app._refresh("crypto")
+        self.assertEqual(self.app.tabs["crypto"].previous_rates, {"BTC": 80000.0})
+
+    def test_watchlist_delta_resets_for_rows_whose_feed_changed(self):
+        self.app.watchlist.toggle("crypto", "BTC")
+        self.app.active_tab = "watchlist"
+        self.app._refresh("crypto")
+        self.app._refresh("watchlist")                       # BTC via CoinGecko
+        self.gecko.error = ProviderError("down")
+        self.lore.quotes = [Quote("BTC", "Bitcoin", 80400.0, "USD", 1.0)]
+        self.clock.now += 60
+        self.app._refresh("crypto")                          # now CoinLore
+        self.app._refresh("watchlist")
+        self.assertNotIn("BTC", self.app.tabs["watchlist"].previous_rates or {})
+
+    def test_pin_missing_from_the_serving_feed_says_so(self):
+        self.app.watchlist.toggle("crypto", "DOGE")         # not in the fake feed
+        self.app._refresh("crypto")
+        self.app._refresh("watchlist")
+        row = self.app.tabs["watchlist"].last_snapshot.quotes[0]
+        self.assertEqual(row.name, "(not in current Crypto feed)")
+
     def test_delta_column_resets_when_the_serving_feed_changes(self):
         self.app._refresh("crypto")                          # served by CoinGecko
         self.gecko.error = ProviderError("down")

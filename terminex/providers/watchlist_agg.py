@@ -19,6 +19,7 @@ QuoteLookup = Callable[[AssetClass, str], Quote | None]
 FxUsdPrice = Callable[[str], float | None]
 SourceFailed = Callable[[AssetClass], bool]
 SourceLoaded = Callable[[AssetClass], bool]
+SourceFeed = Callable[[AssetClass], str | None]
 
 _TAB_LABELS: dict[AssetClass, str] = {
     "fx": "FX",
@@ -38,6 +39,7 @@ class WatchlistAggregator(Provider):
         fx_usd_price: FxUsdPrice | None = None,
         source_failed: SourceFailed | None = None,
         source_loaded: SourceLoaded | None = None,
+        source_feed: SourceFeed | None = None,
     ) -> None:
         self.watchlist = watchlist
         self.lookup = lookup
@@ -51,6 +53,9 @@ class WatchlistAggregator(Provider):
         # a switch to a fallback feed with a different top 25) is then
         # unavailable rather than still loading.
         self.source_loaded = source_loaded
+        # The feed serving each source tab, recorded per row so "Δ since
+        # last" can skip rows whose feed changed between snapshots.
+        self.source_feed = source_feed
 
     def fetch(self) -> Snapshot:
         quotes: list[Quote] = []
@@ -65,6 +70,8 @@ class WatchlistAggregator(Provider):
                 else (pin.asset_class, pin.symbol)
             )
             extra: dict = {"series_key": series_key}
+            if self.source_feed is not None:
+                extra["feed"] = self.source_feed(pin.asset_class)
             if q is not None and pin.asset_class == "fx":
                 price = self.fx_usd_price(q.symbol) if self.fx_usd_price else None
                 extra["fx_rate"] = q.price

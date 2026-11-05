@@ -252,6 +252,14 @@ class TestRetryAfter(unittest.TestCase):
         self.assertEqual(parse_retry_after("0", default=60), 1.0)
         self.assertEqual(parse_retry_after("999999", default=60), 3600.0)
 
+    def test_coingecko_suggests_a_coincap_key_only_without_one(self):
+        resp = lambda: _response(429, None, {"Retry-After": "30"})  # noqa: E731
+        for key_hint, expect in ((True, True), (False, False)):
+            with mock.patch("terminex.providers.crypto_coingecko.requests.get", return_value=resp()):
+                with self.assertRaises(RateLimitError) as ctx:
+                    CryptoCoinGecko(key_hint=key_hint).fetch()
+            self.assertEqual("TERMINEX_COINCAP_KEY" in str(ctx.exception), expect)
+
     def test_coingecko_survives_a_date_header(self):
         resp = _response(429, None, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
         with mock.patch("terminex.providers.crypto_coingecko.requests.get", return_value=resp):
