@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import signal
+import sqlite3
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
@@ -153,26 +154,46 @@ class TabState:
             )
 
 
+def default_providers(config: Config) -> dict[str, Provider]:
+    """The data source for each source tab, chosen from the config."""
+    # CoinCap v3 requires a key; without one the keyless CoinGecko public
+    # API keeps the crypto tab working out of the box.
+    crypto: Provider = (
+        CryptoCoinCap(api_key=config.coincap_api_key)
+        if config.coincap_api_key
+        else CryptoCoinGecko()
+    )
+    return {
+        "fx": FxERApi(base=config.base_currency),
+        "crypto": crypto,
+        "commodity": CommoditiesYahoo(),
+    }
+
+
 class App:
-    def __init__(self, config: Config, interval: float) -> None:
+    def __init__(
+        self,
+        config: Config,
+        interval: float,
+        *,
+        providers: dict[str, Provider] | None = None,
+        store: sqlite3.Connection | None = None,
+        console: Console | None = None,
+        keyboard: Callable[[], KeyboardListener] = KeyboardListener,
+    ) -> None:
+        """Everything with side effects can be passed in (tests do);
+        by default the app builds real providers, the on-disk store, a
+        terminal console and a stdin keyboard listener."""
         self.config = config
         self.interval = interval
         self.active_tab = (
             config.active_tab if config.active_tab in TAB_ORDER else "fx"
         )
-        # CoinCap v3 requires a key; fall back to the keyless CoinGecko
-        # public API when one isn't configured so the crypto tab works
-        # out of the box.
-        crypto_provider: Provider = (
-            CryptoCoinCap(api_key=config.coincap_api_key)
-            if config.coincap_api_key
-            else CryptoCoinGecko()
-        )
+        providers = providers or default_providers(config)
         self.tabs: dict[str, TabState] = {
-            "fx": TabState(FxERApi(base=config.base_currency)),
-            "crypto": TabState(crypto_provider),
-            "commodity": TabState(CommoditiesYahoo()),
+            name: TabState(providers[name]) for name in SOURCE_TABS
         }
+        self._keyboard_factory = keyboard
         self.watchlist = load_watchlist()
         self.tabs["watchlist"] = TabState(
             WatchlistAggregator(
@@ -182,7 +203,7 @@ class App:
                 source_failed=self._source_failed,
             )
         )
-        self.console = Console()
+        self.console = console or Console()
         self.should_quit = False
         self._toast: tuple[str, float] | None = None  # (message, expires_at)
         self.show_help = False
@@ -193,9 +214,11 @@ class App:
         self.converter_error: str | None = None
         self.alert_draft: dict | None = None  # active alert-creation modal state
         self.alert_list_delete_buffer: str = ""
-        self.store, store_notices = open_store()
-        for notice in store_notices:
-            print(f"terminex: {notice}", file=sys.stderr)
+        if store is None:
+            store, store_notices = open_store()
+            for notice in store_notices:
+                print(f"terminex: {notice}", file=sys.stderr)
+        self.store = store
         self.alert_engine = AlertEngine(self.store)
         self.series = SeriesStore(db=self.store)
         self.show_sparklines = False
@@ -1055,7 +1078,7 @@ class App:
         # eager first fetch for the active tab
         self._refresh(self.active_tab)
 
-        kb = KeyboardListener()
+        kb = self._keyboard_factory()
         try:
             kb.start()
             with Live(

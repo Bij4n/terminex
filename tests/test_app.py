@@ -51,11 +51,13 @@ class AppTestCase(unittest.TestCase):
         }
         self.env = mock.patch.dict(os.environ, env)
         self.env.start()
-        self.app = App(config=Config(active_tab="crypto"), interval=10.0)
-        self.app.console = Console(file=io.StringIO(), width=self.width,
-                                   height=self.height, color_system=None)
-        for name, asset in (("fx", "fx"), ("crypto", "crypto"), ("commodity", "commodity")):
-            self.app.tabs[name].provider = FakeProvider(asset_class=asset)
+        self.app = App(
+            config=Config(active_tab="crypto"),
+            interval=10.0,
+            providers={t: FakeProvider(asset_class=t) for t in ("fx", "crypto", "commodity")},
+            console=Console(file=io.StringIO(), width=self.width,
+                            height=self.height, color_system=None),
+        )
 
     def tearDown(self):
         self.app.store.close()
@@ -434,6 +436,71 @@ class TestWatchlistKeepsPolling(AppTestCase):
         self.clock.now += 300
         self.app._poll()
         self.assertEqual(crypto.calls, 0)
+
+
+
+class FakeKeyboard:
+    """Stands in for KeyboardListener: replays scripted keys."""
+
+    def __init__(self, keys=()):
+        self.keys = list(keys)
+        self.started = self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def drain(self):
+        while self.keys:
+            yield self.keys.pop(0)
+
+
+class TestInjection(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = mock.patch.dict(os.environ, {
+            "HOME": self.tmp.name,
+            "XDG_CONFIG_HOME": os.path.join(self.tmp.name, "config"),
+            "XDG_DATA_HOME": os.path.join(self.tmp.name, "data"),
+        })
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def test_default_providers_follow_the_config(self):
+        from terminex.app import default_providers
+        self.assertEqual(default_providers(Config())["crypto"].name, "coingecko.com")
+        self.assertEqual(default_providers(Config(coincap_api_key="k"))["crypto"].name, "coincap.io")
+        self.assertEqual(default_providers(Config(base_currency="EUR"))["fx"].base, "EUR")
+
+    def test_app_uses_what_it_is_given(self):
+        from terminex.store import connect_memory
+        providers = {t: FakeProvider(asset_class=t) for t in ("fx", "crypto", "commodity")}
+        store = connect_memory()
+        console = Console(file=io.StringIO(), width=100, height=30)
+        app = App(Config(), 10.0, providers=providers, store=store, console=console)
+        self.assertIs(app.tabs["crypto"].provider, providers["crypto"])
+        self.assertIs(app.store, store)
+        self.assertIs(app.console, console)
+        store.close()
+
+    def test_main_loop_quits_on_q_and_cleans_up(self):
+        from terminex.store import connect_memory
+        keyboard = FakeKeyboard(["j", "q"])
+        app = App(
+            Config(active_tab="crypto"), 10.0,
+            providers={t: FakeProvider(asset_class=t) for t in ("fx", "crypto", "commodity")},
+            store=connect_memory(),
+            console=Console(file=io.StringIO(), width=100, height=30),
+            keyboard=lambda: keyboard,
+        )
+        self.assertEqual(app.run(), 0)
+        self.assertTrue(keyboard.started and keyboard.stopped)
+        self.assertIn("BTC", app.console.file.getvalue())
 
 
 if __name__ == "__main__":
